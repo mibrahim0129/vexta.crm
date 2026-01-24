@@ -33,6 +33,10 @@ export default function DealsPage() {
     value: "",
   });
 
+  // Inline edits keyed by deal_id
+  const [editMap, setEditMap] = useState({}); // { [id]: { title, value } }
+  const [savingId, setSavingId] = useState(""); // deal_id being saved
+
   async function requireSession() {
     const { data } = await sb.auth.getSession();
     if (!data?.session) {
@@ -53,7 +57,6 @@ export default function DealsPage() {
     const list = Array.isArray(data) ? data : [];
     setContacts(list);
 
-    // Set default contact if none selected
     if (!form.contact_id && list.length > 0) {
       setForm((p) => ({ ...p, contact_id: list[0].id }));
     }
@@ -67,7 +70,7 @@ export default function DealsPage() {
     setLoading(true);
 
     try {
-      const query = sb
+      const { data, error } = await sb
         .from("deals")
         .select(
           `
@@ -82,10 +85,17 @@ export default function DealsPage() {
         )
         .order("created_at", { ascending: false });
 
-      const { data, error } = await query;
       if (error) throw error;
 
-      setDeals(Array.isArray(data) ? data : []);
+      const list = Array.isArray(data) ? data : [];
+      setDeals(list);
+
+      // prime editMap
+      const m = {};
+      for (const d of list) {
+        m[d.id] = { title: d.title || "", value: String(d.value ?? 0) };
+      }
+      setEditMap(m);
     } catch (e) {
       console.error(e);
       setErr(e?.message || "Failed to load deals");
@@ -160,8 +170,8 @@ export default function DealsPage() {
 
       if (error) throw error;
 
-      // Optimistic insert
       setDeals((prev) => [data, ...prev]);
+      setEditMap((p) => ({ ...p, [data.id]: { title: data.title || "", value: String(data.value ?? 0) } }));
       setForm((p) => ({ ...p, title: "", status: "lead", value: "" }));
     } catch (e) {
       console.error(e);
@@ -180,12 +190,42 @@ export default function DealsPage() {
       const { error } = await sb.from("deals").update({ status: newStatus }).eq("id", dealId);
       if (error) throw error;
 
-      setDeals((prev) =>
-        prev.map((d) => (d.id === dealId ? { ...d, status: newStatus } : d))
-      );
+      setDeals((prev) => prev.map((d) => (d.id === dealId ? { ...d, status: newStatus } : d)));
     } catch (e) {
       console.error(e);
       setErr(e?.message || "Failed to update deal");
+    }
+  }
+
+  async function saveDealDetails(dealId) {
+    setErr("");
+    setSavingId(dealId);
+
+    try {
+      const session = await requireSession();
+      if (!session) return;
+
+      const cur = editMap[dealId] || { title: "", value: "0" };
+      const title = String(cur.title || "").trim();
+      if (!title) {
+        setErr("Deal title can’t be empty.");
+        return;
+      }
+
+      const valueNum = cur.value === "" ? 0 : Number(cur.value);
+      const safeValue = Number.isFinite(valueNum) ? valueNum : 0;
+
+      const { error } = await sb.from("deals").update({ title, value: safeValue }).eq("id", dealId);
+      if (error) throw error;
+
+      setDeals((prev) =>
+        prev.map((d) => (d.id === dealId ? { ...d, title, value: safeValue } : d))
+      );
+    } catch (e) {
+      console.error(e);
+      setErr(e?.message || "Failed to save deal");
+    } finally {
+      setSavingId("");
     }
   }
 
@@ -202,6 +242,11 @@ export default function DealsPage() {
       if (error) throw error;
 
       setDeals((prev) => prev.filter((d) => d.id !== dealId));
+      setEditMap((p) => {
+        const copy = { ...p };
+        delete copy[dealId];
+        return copy;
+      });
     } catch (e) {
       console.error(e);
       setErr(e?.message || "Failed to delete deal");
@@ -214,15 +259,12 @@ export default function DealsPage() {
     (async () => {
       await loadAll();
 
-      // Realtime sync
       const channel = sb.channel("deals-rt");
-
       channel
         .on("postgres_changes", { event: "*", schema: "public", table: "deals" }, () => {
           if (mountedRef.current) loadDeals();
         })
         .on("postgres_changes", { event: "*", schema: "public", table: "contacts" }, () => {
-          // contact names can change, refresh data
           if (mountedRef.current) loadAll();
         })
         .subscribe((status) => setRtStatus(String(status || "").toLowerCase()));
@@ -245,7 +287,7 @@ export default function DealsPage() {
         <div>
           <h1 style={styles.h1}>Deals</h1>
           <p style={styles.sub}>
-            Track opportunities • Realtime: <span style={styles.badge}>{rtStatus}</span>
+            Realtime: <span style={styles.badge}>{rtStatus}</span>
           </p>
         </div>
 
@@ -311,7 +353,7 @@ export default function DealsPage() {
           <input
             value={form.title}
             onChange={(e) => setForm((p) => ({ ...p, title: e.target.value }))}
-            placeholder="Deal title (ex: 123 Main St Listing)"
+            placeholder="Deal title"
             style={styles.input}
           />
 
@@ -347,9 +389,7 @@ export default function DealsPage() {
         {loading ? (
           <div style={{ opacity: 0.75 }}>Loading…</div>
         ) : filteredDeals.length === 0 ? (
-          <div style={{ opacity: 0.75 }}>
-            No deals yet{filterStatus !== "all" ? " for this status" : ""}. Add one above.
-          </div>
+          <div style={{ opacity: 0.75 }}>No deals yet.</div>
         ) : (
           <div style={{ display: "grid", gap: 10, marginTop: 10 }}>
             {filteredDeals.map((d) => {
@@ -358,44 +398,74 @@ export default function DealsPage() {
                 ? `${c.first_name || ""} ${c.last_name || ""}`.trim() || "Unnamed"
                 : "No contact";
 
+              const edit = editMap[d.id] || { title: d.title || "", value: String(d.value ?? 0) };
+
               return (
                 <div key={d.id} style={styles.listItem}>
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ fontWeight: 950, fontSize: 16 }}>{d.title}</div>
+                  <div style={{ minWidth: 0, width: "100%" }}>
+                    <div style={styles.rowTop}>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontWeight: 950, fontSize: 12, opacity: 0.7 }}>Contact</div>
+                        {c ? (
+                          <Link href={`/dashboard/contacts/${d.contact_id}`} style={styles.link}>
+                            {contactName}
+                          </Link>
+                        ) : (
+                          <div style={{ fontWeight: 900 }}>{contactName}</div>
+                        )}
+                      </div>
 
-                    <div style={styles.meta}>
-                      <span style={{ opacity: 0.9 }}>Contact:</span>{" "}
-                      {c ? (
-                        <Link href={`/dashboard/contacts/${d.contact_id}`} style={styles.link}>
-                          {contactName}
-                        </Link>
-                      ) : (
-                        <span>{contactName}</span>
-                      )}
-                      {" • "}
-                      <span style={{ opacity: 0.9 }}>Value:</span> $
-                      {Number(d.value || 0).toLocaleString()}
+                      <button onClick={() => deleteDeal(d.id)} style={styles.btnDanger}>
+                        Delete
+                      </button>
                     </div>
 
-                    <div style={{ marginTop: 8, display: "flex", gap: 10, alignItems: "center" }}>
-                      <div style={{ fontSize: 13, opacity: 0.8, fontWeight: 900 }}>Status</div>
-                      <select
-                        value={d.status}
-                        onChange={(e) => updateDealStatus(d.id, e.target.value)}
-                        style={styles.selectInline}
-                      >
-                        {STATUSES.map((s) => (
-                          <option key={s.value} value={s.value}>
-                            {s.label}
-                          </option>
-                        ))}
-                      </select>
+                    <div style={{ display: "grid", gap: 10, marginTop: 10 }}>
+                      <div style={styles.grid2}>
+                        <input
+                          value={edit.title}
+                          onChange={(e) =>
+                            setEditMap((p) => ({ ...p, [d.id]: { ...edit, title: e.target.value } }))
+                          }
+                          style={styles.input}
+                          placeholder="Deal title"
+                        />
+                        <input
+                          value={edit.value}
+                          onChange={(e) =>
+                            setEditMap((p) => ({ ...p, [d.id]: { ...edit, value: e.target.value } }))
+                          }
+                          style={styles.input}
+                          placeholder="Value ($)"
+                        />
+                      </div>
+
+                      <div style={styles.rowBottom}>
+                        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                          <div style={{ fontSize: 13, opacity: 0.8, fontWeight: 900 }}>Status</div>
+                          <select
+                            value={d.status}
+                            onChange={(e) => updateDealStatus(d.id, e.target.value)}
+                            style={styles.selectInline}
+                          >
+                            {STATUSES.map((s) => (
+                              <option key={s.value} value={s.value}>
+                                {s.label}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <button
+                          onClick={() => saveDealDetails(d.id)}
+                          disabled={savingId === d.id}
+                          style={styles.btnPrimarySmall}
+                        >
+                          {savingId === d.id ? "Saving..." : "Save"}
+                        </button>
+                      </div>
                     </div>
                   </div>
-
-                  <button onClick={() => deleteDeal(d.id)} style={styles.btnDanger}>
-                    Delete
-                  </button>
                 </div>
               );
             })}
@@ -498,6 +568,17 @@ const styles = {
     cursor: "pointer",
   },
 
+  btnPrimarySmall: {
+    padding: "10px 12px",
+    borderRadius: 12,
+    border: "1px solid #f5f5f5",
+    background: "#f5f5f5",
+    color: "#0b0b0b",
+    fontWeight: 950,
+    cursor: "pointer",
+    fontSize: 13,
+  },
+
   btnDanger: {
     padding: "10px 12px",
     borderRadius: 12,
@@ -515,12 +596,11 @@ const styles = {
     border: "1px solid #242424",
     background: "#111111",
     display: "flex",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
     gap: 10,
   },
 
-  meta: { opacity: 0.75, marginTop: 6, fontSize: 13, lineHeight: 1.4 },
+  rowTop: { display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start" },
+  rowBottom: { display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" },
 
   link: { color: "white", fontWeight: 950, textDecoration: "underline" },
 

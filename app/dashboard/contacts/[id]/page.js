@@ -1,27 +1,49 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { useParams } from "next/navigation";
+import Link from "next/link";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { supabaseBrowser } from "@/lib/supabaseBrowser";
 
-export default function ContactDetailPage() {
-  const { id } = useParams();
+export default function ContactDetailPage({ params }) {
   const sb = useMemo(() => supabaseBrowser(), []);
+  const router = useRouter();
+  const mountedRef = useRef(false);
+
+  const contactId = params?.id;
 
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [err, setErr] = useState("");
+
+  const [rtStatus, setRtStatus] = useState("connecting");
 
   const [contact, setContact] = useState(null);
   const [deals, setDeals] = useState([]);
   const [notes, setNotes] = useState([]);
 
-  const [dealForm, setDealForm] = useState({ title: "", status: "lead", value: "" });
+  // Edit form
+  const [edit, setEdit] = useState({
+    first_name: "",
+    last_name: "",
+    email: "",
+    phone: "",
+  });
+
+  // Add Deal form
+  const [dealForm, setDealForm] = useState({
+    title: "",
+    status: "lead",
+    value: "",
+  });
+
+  // Add Note form
   const [noteBody, setNoteBody] = useState("");
 
   async function requireSession() {
     const { data } = await sb.auth.getSession();
     if (!data?.session) {
-      window.location.href = `/login?next=/dashboard/contacts/${id}`;
+      window.location.href = `/login?next=/dashboard/contacts/${contactId}`;
       return null;
     }
     return data.session;
@@ -34,30 +56,40 @@ export default function ContactDetailPage() {
       const session = await requireSession();
       if (!session) return;
 
-      const { data: c, error: ce } = await sb
-        .from("contacts")
-        .select("id, first_name, last_name, email, phone, created_at")
-        .eq("id", id)
-        .single();
-      if (ce) throw ce;
+      const [{ data: c, error: cErr }, { data: d, error: dErr }, { data: n, error: nErr }] =
+        await Promise.all([
+          sb
+            .from("contacts")
+            .select("id, first_name, last_name, email, phone, created_at")
+            .eq("id", contactId)
+            .single(),
+          sb
+            .from("deals")
+            .select("id, title, status, value, created_at")
+            .eq("contact_id", contactId)
+            .order("created_at", { ascending: false }),
+          sb
+            .from("notes")
+            .select("id, body, deal_id, created_at, deals:deal_id ( id, title )")
+            .eq("contact_id", contactId)
+            .order("created_at", { ascending: false }),
+        ]);
 
-      const { data: d, error: de } = await sb
-        .from("deals")
-        .select("id, title, status, value, created_at")
-        .eq("contact_id", id)
-        .order("created_at", { ascending: false });
-      if (de) throw de;
+      if (cErr) throw cErr;
+      if (dErr) throw dErr;
+      if (nErr) throw nErr;
 
-      const { data: n, error: ne } = await sb
-        .from("notes")
-        .select("id, body, deal_id, created_at")
-        .eq("contact_id", id)
-        .order("created_at", { ascending: false });
-      if (ne) throw ne;
-
-      setContact(c);
+      setContact(c || null);
       setDeals(Array.isArray(d) ? d : []);
       setNotes(Array.isArray(n) ? n : []);
+
+      // prime edit form
+      setEdit({
+        first_name: c?.first_name || "",
+        last_name: c?.last_name || "",
+        email: c?.email || "",
+        phone: c?.phone || "",
+      });
     } catch (e) {
       console.error(e);
       setErr(e?.message || "Failed to load contact");
@@ -66,11 +98,45 @@ export default function ContactDetailPage() {
     }
   }
 
+  async function saveContact(e) {
+    e?.preventDefault?.();
+    setErr("");
+    setSaving(true);
+    try {
+      const session = await requireSession();
+      if (!session) return;
+
+      const payload = {
+        first_name: edit.first_name.trim() || null,
+        last_name: edit.last_name.trim() || null,
+        email: edit.email.trim() || null,
+        phone: edit.phone.trim() || null,
+      };
+
+      const { data, error } = await sb
+        .from("contacts")
+        .update(payload)
+        .eq("id", contactId)
+        .select("id, first_name, last_name, email, phone, created_at")
+        .single();
+
+      if (error) throw error;
+
+      setContact(data);
+    } catch (e) {
+      console.error(e);
+      setErr(e?.message || "Failed to save contact");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function addDeal(e) {
     e.preventDefault();
     setErr("");
 
-    if (!dealForm.title.trim()) {
+    const title = dealForm.title.trim();
+    if (!title) {
       setErr("Deal title is required.");
       return;
     }
@@ -87,8 +153,8 @@ export default function ContactDetailPage() {
         .insert([
           {
             user_id: session.user.id,
-            contact_id: id,
-            title: dealForm.title.trim(),
+            contact_id: contactId,
+            title,
             status: dealForm.status,
             value: safeValue,
           },
@@ -110,7 +176,8 @@ export default function ContactDetailPage() {
     e.preventDefault();
     setErr("");
 
-    if (!noteBody.trim()) {
+    const body = noteBody.trim();
+    if (!body) {
       setErr("Note can’t be empty.");
       return;
     }
@@ -124,12 +191,12 @@ export default function ContactDetailPage() {
         .insert([
           {
             user_id: session.user.id,
-            contact_id: id,
+            contact_id: contactId,
             deal_id: null,
-            body: noteBody.trim(),
+            body,
           },
         ])
-        .select("id, body, deal_id, created_at")
+        .select("id, body, deal_id, created_at, deals:deal_id ( id, title )")
         .single();
 
       if (error) throw error;
@@ -142,176 +209,273 @@ export default function ContactDetailPage() {
     }
   }
 
-  async function deleteDeal(dealId) {
+  async function deleteContact() {
     setErr("");
-    const ok = confirm("Delete this deal?");
+    const ok = confirm("Delete this contact? This will also delete their notes.");
     if (!ok) return;
 
     try {
-      const { error } = await sb.from("deals").delete().eq("id", dealId);
+      const session = await requireSession();
+      if (!session) return;
+
+      const { error } = await sb.from("contacts").delete().eq("id", contactId);
       if (error) throw error;
-      setDeals((prev) => prev.filter((d) => d.id !== dealId));
+
+      router.push("/dashboard/contacts");
+      router.refresh();
     } catch (e) {
       console.error(e);
-      setErr(e?.message || "Failed to delete deal");
-    }
-  }
-
-  async function deleteNote(noteId) {
-    setErr("");
-    const ok = confirm("Delete this note?");
-    if (!ok) return;
-
-    try {
-      const { error } = await sb.from("notes").delete().eq("id", noteId);
-      if (error) throw error;
-      setNotes((prev) => prev.filter((n) => n.id !== noteId));
-    } catch (e) {
-      console.error(e);
-      setErr(e?.message || "Failed to delete note");
+      setErr(e?.message || "Failed to delete contact");
     }
   }
 
   useEffect(() => {
-    loadAll();
+    mountedRef.current = true;
 
-    const ch = sb
-      .channel(`contact-${id}-sync`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "deals" }, () => loadAll())
-      .on("postgres_changes", { event: "*", schema: "public", table: "notes" }, () => loadAll())
-      .subscribe();
+    (async () => {
+      await loadAll();
 
-    return () => {
-      sb.removeChannel(ch);
-    };
+      // Realtime: refresh this page if related rows change
+      const channel = sb.channel(`contact-${contactId}-rt`);
+
+      channel
+        .on("postgres_changes", { event: "*", schema: "public", table: "contacts" }, (p) => {
+          if (p?.new?.id === contactId || p?.old?.id === contactId) {
+            if (mountedRef.current) loadAll();
+          }
+        })
+        .on("postgres_changes", { event: "*", schema: "public", table: "deals" }, (p) => {
+          if (p?.new?.contact_id === contactId || p?.old?.contact_id === contactId) {
+            if (mountedRef.current) loadAll();
+          }
+        })
+        .on("postgres_changes", { event: "*", schema: "public", table: "notes" }, (p) => {
+          if (p?.new?.contact_id === contactId || p?.old?.contact_id === contactId) {
+            if (mountedRef.current) loadAll();
+          }
+        })
+        .subscribe((status) => setRtStatus(String(status || "").toLowerCase()));
+
+      return () => {
+        mountedRef.current = false;
+        sb.removeChannel(channel);
+      };
+    })();
+
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id]);
+  }, [contactId]);
 
-  const displayName = contact
-    ? `${contact.first_name || ""} ${contact.last_name || ""}`.trim() || "Unnamed"
-    : "";
+  const displayName =
+    contact ? `${contact.first_name || ""} ${contact.last_name || ""}`.trim() || "Unnamed" : "Contact";
 
   return (
     <div>
-      <div style={styles.top}>
+      <div style={styles.header}>
         <div>
-          <h1 style={styles.h1}>{loading ? "Loading..." : displayName}</h1>
+          <div style={{ opacity: 0.7, fontSize: 12 }}>
+            <Link href="/dashboard/contacts" style={styles.breadcrumb}>
+              Contacts
+            </Link>{" "}
+            / {displayName}
+          </div>
+          <h1 style={styles.h1}>{displayName}</h1>
           <p style={styles.sub}>
-            {contact?.email ? `Email: ${contact.email}` : null}
-            {contact?.email && contact?.phone ? " • " : null}
-            {contact?.phone ? `Phone: ${contact.phone}` : null}
+            Realtime: <span style={styles.badge}>{rtStatus}</span>
           </p>
         </div>
 
-        <a href="/dashboard/contacts" style={styles.btnGhost}>
-          ← Back
-        </a>
+        <div style={{ display: "flex", gap: 10 }}>
+          <button onClick={loadAll} disabled={loading} style={styles.btnGhost}>
+            {loading ? "Refreshing..." : "Refresh"}
+          </button>
+          <button onClick={deleteContact} style={styles.btnDanger}>
+            Delete
+          </button>
+        </div>
       </div>
 
       {err ? <div style={styles.alert}>{err}</div> : null}
 
-      <div style={styles.grid}>
-        <div style={styles.card}>
-          <h2 style={styles.h2}>Deals</h2>
+      {loading && !contact ? (
+        <div style={{ opacity: 0.75 }}>Loading…</div>
+      ) : !contact ? (
+        <div style={{ opacity: 0.75 }}>Contact not found.</div>
+      ) : (
+        <>
+          {/* EDIT CONTACT */}
+          <div style={styles.card}>
+            <h2 style={styles.h2}>Edit Contact</h2>
 
-          <form onSubmit={addDeal} style={{ display: "grid", gap: 10, marginTop: 12 }}>
-            <input
-              value={dealForm.title}
-              onChange={(e) => setDealForm((p) => ({ ...p, title: e.target.value }))}
-              placeholder="Deal title (ex: 123 Main St Listing)"
-              style={styles.input}
-            />
+            <form onSubmit={saveContact} style={styles.form}>
+              <div style={styles.grid2}>
+                <input
+                  value={edit.first_name}
+                  onChange={(e) => setEdit((p) => ({ ...p, first_name: e.target.value }))}
+                  placeholder="First name"
+                  style={styles.input}
+                />
+                <input
+                  value={edit.last_name}
+                  onChange={(e) => setEdit((p) => ({ ...p, last_name: e.target.value }))}
+                  placeholder="Last name"
+                  style={styles.input}
+                />
+              </div>
 
-            <div style={styles.grid2}>
-              <select
-                value={dealForm.status}
-                onChange={(e) => setDealForm((p) => ({ ...p, status: e.target.value }))}
-                style={styles.select}
-              >
-                <option value="lead">Lead</option>
-                <option value="active">Active</option>
-                <option value="under_contract">Under Contract</option>
-                <option value="closed">Closed</option>
-              </select>
+              <div style={styles.grid2}>
+                <input
+                  value={edit.email}
+                  onChange={(e) => setEdit((p) => ({ ...p, email: e.target.value }))}
+                  placeholder="Email"
+                  style={styles.input}
+                />
+                <input
+                  value={edit.phone}
+                  onChange={(e) => setEdit((p) => ({ ...p, phone: e.target.value }))}
+                  placeholder="Phone"
+                  style={styles.input}
+                />
+              </div>
 
+              <button type="submit" disabled={saving} style={styles.btnPrimary}>
+                {saving ? "Saving..." : "Save Contact"}
+              </button>
+            </form>
+          </div>
+
+          {/* QUICK ADD: DEAL */}
+          <div style={styles.card}>
+            <h2 style={styles.h2}>Add Deal</h2>
+            <form onSubmit={addDeal} style={styles.form}>
               <input
-                value={dealForm.value}
-                onChange={(e) => setDealForm((p) => ({ ...p, value: e.target.value }))}
-                placeholder="Value ($)"
+                value={dealForm.title}
+                onChange={(e) => setDealForm((p) => ({ ...p, title: e.target.value }))}
+                placeholder="Deal title (ex: 123 Main St Listing)"
                 style={styles.input}
               />
-            </div>
 
-            <button style={styles.btnPrimary}>Add Deal</button>
-          </form>
+              <div style={styles.grid2}>
+                <select
+                  value={dealForm.status}
+                  onChange={(e) => setDealForm((p) => ({ ...p, status: e.target.value }))}
+                  style={styles.select}
+                >
+                  <option value="lead">Lead</option>
+                  <option value="active">Active</option>
+                  <option value="under_contract">Under Contract</option>
+                  <option value="closed">Closed</option>
+                </select>
 
-          <div style={{ marginTop: 14, display: "grid", gap: 10 }}>
+                <input
+                  value={dealForm.value}
+                  onChange={(e) => setDealForm((p) => ({ ...p, value: e.target.value }))}
+                  placeholder="Value ($)"
+                  style={styles.input}
+                />
+              </div>
+
+              <button type="submit" style={styles.btnPrimary}>
+                Add Deal
+              </button>
+            </form>
+          </div>
+
+          {/* QUICK ADD: NOTE */}
+          <div style={styles.card}>
+            <h2 style={styles.h2}>Add Note</h2>
+            <form onSubmit={addNote} style={styles.form}>
+              <textarea
+                value={noteBody}
+                onChange={(e) => setNoteBody(e.target.value)}
+                placeholder="Write a note..."
+                style={styles.textarea}
+                rows={4}
+              />
+              <button type="submit" style={styles.btnPrimary}>
+                Add Note
+              </button>
+            </form>
+          </div>
+
+          {/* DEALS LIST */}
+          <div style={{ marginTop: 18 }}>
+            <h2 style={styles.h2}>Deals ({deals.length})</h2>
             {deals.length === 0 ? (
-              <div style={{ opacity: 0.75 }}>No deals yet.</div>
+              <div style={{ opacity: 0.75, marginTop: 10 }}>No deals yet.</div>
             ) : (
-              deals.map((d) => (
-                <div key={d.id} style={styles.itemRow}>
-                  <div>
+              <div style={{ display: "grid", gap: 10, marginTop: 10 }}>
+                {deals.map((d) => (
+                  <div key={d.id} style={styles.listItem}>
                     <div style={{ fontWeight: 950 }}>{d.title}</div>
-                    <div style={{ opacity: 0.75, fontSize: 13, marginTop: 4 }}>
-                      Status: {d.status} • Value: ${Number(d.value || 0).toLocaleString()}
+                    <div style={styles.meta}>
+                      Status: <b>{d.status}</b> • Value: ${Number(d.value || 0).toLocaleString()}
+                    </div>
+                    <Link href="/dashboard/deals" style={styles.linkSmall}>
+                      Edit deals →
+                    </Link>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* NOTES LIST */}
+          <div style={{ marginTop: 18 }}>
+            <h2 style={styles.h2}>Notes ({notes.length})</h2>
+            {notes.length === 0 ? (
+              <div style={{ opacity: 0.75, marginTop: 10 }}>No notes yet.</div>
+            ) : (
+              <div style={{ display: "grid", gap: 10, marginTop: 10 }}>
+                {notes.map((n) => (
+                  <div key={n.id} style={styles.noteItem}>
+                    <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.5 }}>{n.body}</div>
+                    <div style={styles.meta}>
+                      {n.deals?.title ? (
+                        <>
+                          Deal: <b>{n.deals.title}</b> •{" "}
+                        </>
+                      ) : null}
+                      {n.created_at ? new Date(n.created_at).toLocaleString() : ""}
                     </div>
                   </div>
-                  <button onClick={() => deleteDeal(d.id)} style={styles.btnDanger}>
-                    Delete
-                  </button>
-                </div>
-              ))
+                ))}
+              </div>
             )}
           </div>
-        </div>
-
-        <div style={styles.card}>
-          <h2 style={styles.h2}>Notes</h2>
-
-          <form onSubmit={addNote} style={{ display: "grid", gap: 10, marginTop: 12 }}>
-            <textarea
-              value={noteBody}
-              onChange={(e) => setNoteBody(e.target.value)}
-              placeholder="Write a note..."
-              style={styles.textarea}
-              rows={4}
-            />
-            <button style={styles.btnPrimary}>Add Note</button>
-          </form>
-
-          <div style={{ marginTop: 14, display: "grid", gap: 10 }}>
-            {notes.length === 0 ? (
-              <div style={{ opacity: 0.75 }}>No notes yet.</div>
-            ) : (
-              notes.map((n) => (
-                <div key={n.id} style={styles.noteItem}>
-                  <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.45 }}>{n.body}</div>
-                  <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 10 }}>
-                    <button onClick={() => deleteNote(n.id)} style={styles.btnDanger}>
-                      Delete
-                    </button>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-      </div>
+        </>
+      )}
     </div>
   );
 }
 
 const styles = {
-  top: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 },
+  header: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 },
   h1: { margin: 0, fontSize: 28, fontWeight: 950 },
   sub: { marginTop: 6, opacity: 0.75 },
 
-  grid: { marginTop: 16, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 },
+  breadcrumb: { color: "white", textDecoration: "none", fontWeight: 900 },
 
-  card: { padding: 16, border: "1px solid #242424", borderRadius: 16, background: "#111111" },
+  badge: {
+    display: "inline-block",
+    padding: "2px 10px",
+    borderRadius: 999,
+    border: "1px solid rgba(255,255,255,0.16)",
+    background: "rgba(255,255,255,0.06)",
+    fontWeight: 900,
+    fontSize: 12,
+  },
+
   h2: { margin: 0, fontSize: 18, fontWeight: 900 },
 
+  card: {
+    marginTop: 18,
+    padding: 16,
+    border: "1px solid #242424",
+    borderRadius: 16,
+    background: "#111111",
+  },
+
+  form: { marginTop: 12, display: "grid", gap: 10 },
   grid2: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 },
 
   input: {
@@ -322,6 +486,7 @@ const styles = {
     color: "white",
     outline: "none",
   },
+
   select: {
     padding: 12,
     borderRadius: 12,
@@ -330,6 +495,7 @@ const styles = {
     color: "white",
     outline: "none",
   },
+
   textarea: {
     padding: 12,
     borderRadius: 12,
@@ -340,33 +506,17 @@ const styles = {
     resize: "vertical",
   },
 
-  itemRow: {
-    padding: 12,
-    borderRadius: 14,
-    border: "1px solid #242424",
-    background: "#101010",
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    gap: 10,
-  },
-  noteItem: {
-    padding: 12,
-    borderRadius: 14,
-    border: "1px solid #242424",
-    background: "#101010",
-  },
-
   btnGhost: {
     padding: "10px 14px",
     borderRadius: 999,
     border: "1px solid rgba(255,255,255,0.16)",
     background: "rgba(255,255,255,0.06)",
     color: "white",
-    textDecoration: "none",
+    cursor: "pointer",
     fontWeight: 900,
     fontSize: 13,
   },
+
   btnPrimary: {
     padding: "12px 14px",
     borderRadius: 12,
@@ -377,14 +527,16 @@ const styles = {
     cursor: "pointer",
     width: "fit-content",
   },
+
   btnDanger: {
     padding: "10px 12px",
-    borderRadius: 12,
+    borderRadius: 999,
     border: "1px solid rgba(239,68,68,0.35)",
     background: "rgba(239,68,68,0.10)",
     color: "#fecaca",
     cursor: "pointer",
     fontWeight: 950,
+    fontSize: 13,
   },
 
   alert: {
@@ -394,5 +546,28 @@ const styles = {
     background: "#1a0f0f",
     border: "1px solid #5a1f1f",
     color: "#ffd6d6",
+    fontWeight: 900,
   },
+
+  listItem: {
+    padding: 14,
+    borderRadius: 16,
+    border: "1px solid #242424",
+    background: "#111111",
+    display: "grid",
+    gap: 6,
+  },
+
+  noteItem: {
+    padding: 14,
+    borderRadius: 16,
+    border: "1px solid #242424",
+    background: "#111111",
+    display: "grid",
+    gap: 8,
+  },
+
+  meta: { opacity: 0.75, fontSize: 13, lineHeight: 1.4 },
+
+  linkSmall: { color: "white", fontWeight: 900, textDecoration: "underline", fontSize: 13 },
 };

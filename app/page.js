@@ -9,7 +9,7 @@ export default function Home() {
       </nav>
 
       <h1>Vexta CRM</h1>
-      <p>These bitches love sosa.</p>
+      <p>Whats up with it mf.</p>
     </main>
   );
 }
