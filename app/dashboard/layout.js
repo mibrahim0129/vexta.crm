@@ -12,11 +12,21 @@ export default function DashboardLayout({ children }) {
   const [email, setEmail] = useState("");
 
   useEffect(() => {
+    let cancelled = false;
+
     (async () => {
-      const { data } = await sb.auth.getSession();
-      const e = data?.session?.user?.email || "";
-      setEmail(e);
+      try {
+        const { data } = await sb.auth.getSession();
+        const e = data?.session?.user?.email || "";
+        if (!cancelled) setEmail(e);
+      } catch {
+        if (!cancelled) setEmail("");
+      }
     })();
+
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -24,6 +34,7 @@ export default function DashboardLayout({ children }) {
     try {
       await sb.auth.signOut();
     } finally {
+      // hard redirect so session/cookies reset everywhere
       window.location.href = "/login";
     }
   }
@@ -33,7 +44,15 @@ export default function DashboardLayout({ children }) {
     { href: "/dashboard/contacts", label: "Contacts" },
     { href: "/dashboard/deals", label: "Deals" },
     { href: "/dashboard/notes", label: "Notes" },
+    { href: "/dashboard/tasks", label: "Tasks" },
+    { href: "/dashboard/calendar", label: "Calendar" },
   ];
+
+  function isActive(href) {
+    if (!pathname) return false;
+    if (href === "/dashboard") return pathname === "/dashboard";
+    return pathname === href || pathname.startsWith(href + "/");
+  }
 
   return (
     <div style={styles.shell}>
@@ -49,11 +68,7 @@ export default function DashboardLayout({ children }) {
 
         <nav style={styles.nav}>
           {nav.map((item) => {
-            const active =
-              item.href === "/dashboard"
-                ? pathname === "/dashboard"
-                : pathname?.startsWith(item.href);
-
+            const active = isActive(item.href);
             return (
               <Link
                 key={item.href}
@@ -81,7 +96,7 @@ export default function DashboardLayout({ children }) {
           </div>
 
           <div style={styles.sideHint}>
-            Tip: Use Contacts → Deals → Notes for your workflow.
+            Tip: Contacts → Deals → Notes. Now add Tasks + Calendar to stay on top of follow-ups.
           </div>
         </div>
       </aside>
