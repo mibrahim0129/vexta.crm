@@ -4,6 +4,25 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { supabaseBrowser } from "@/lib/supabaseBrowser";
 
+function startOfToday() {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+function endOfToday() {
+  const d = new Date();
+  d.setHours(23, 59, 59, 999);
+  return d;
+}
+function endOfWeek() {
+  const d = startOfToday();
+  const day = d.getDay(); // 0 Sun
+  const diff = 6 - day;
+  d.setDate(d.getDate() + diff);
+  d.setHours(23, 59, 59, 999);
+  return d;
+}
+
 export default function CalendarPage() {
   const sb = useMemo(() => supabaseBrowser(), []);
   const mountedRef = useRef(false);
@@ -16,7 +35,7 @@ export default function CalendarPage() {
   const [deals, setDeals] = useState([]);
   const [events, setEvents] = useState([]);
 
-  const [range, setRange] = useState("upcoming"); // upcoming | all
+  const [range, setRange] = useState("week"); // today | week | all
 
   const [form, setForm] = useState({
     contact_id: "",
@@ -82,8 +101,10 @@ export default function CalendarPage() {
         )
         .order("start_at", { ascending: true });
 
-      if (range === "upcoming") {
-        q = q.gte("start_at", new Date(Date.now() - 1000 * 60 * 60 * 2).toISOString());
+      if (range === "today") {
+        q = q.gte("start_at", startOfToday().toISOString()).lte("start_at", endOfToday().toISOString());
+      } else if (range === "week") {
+        q = q.gte("start_at", startOfToday().toISOString()).lte("start_at", endOfWeek().toISOString());
       }
 
       const { data, error } = await q;
@@ -206,12 +227,6 @@ export default function CalendarPage() {
         .on("postgres_changes", { event: "*", schema: "public", table: "calendar_events" }, () => {
           if (mountedRef.current) loadEvents();
         })
-        .on("postgres_changes", { event: "*", schema: "public", table: "contacts" }, () => {
-          if (mountedRef.current) loadAll();
-        })
-        .on("postgres_changes", { event: "*", schema: "public", table: "deals" }, () => {
-          if (mountedRef.current) loadAll();
-        })
         .subscribe((status) => setRtStatus(String(status || "").toLowerCase()));
 
       return () => {
@@ -223,21 +238,36 @@ export default function CalendarPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const grouped = events.reduce((acc, ev) => {
+    const dayKey = new Date(ev.start_at).toDateString();
+    acc[dayKey] = acc[dayKey] || [];
+    acc[dayKey].push(ev);
+    return acc;
+  }, {});
+  const groupKeys = Object.keys(grouped);
+
   return (
     <div>
       <div style={styles.header}>
         <div>
           <h1 style={styles.h1}>Calendar</h1>
-          <p style={styles.sub}>
+          <div style={styles.sub}>
             Realtime: <span style={styles.badge}>{rtStatus}</span>
-          </p>
+          </div>
         </div>
 
         <div style={styles.headerRight}>
-          <select value={range} onChange={(e) => setRange(e.target.value)} style={styles.selectSmall}>
-            <option value="upcoming">Upcoming</option>
-            <option value="all">All</option>
-          </select>
+          <div style={styles.pills}>
+            <button onClick={() => setRange("today")} style={{ ...styles.pill, ...(range === "today" ? styles.pillOn : {}) }}>
+              Today
+            </button>
+            <button onClick={() => setRange("week")} style={{ ...styles.pill, ...(range === "week" ? styles.pillOn : {}) }}>
+              This Week
+            </button>
+            <button onClick={() => setRange("all")} style={{ ...styles.pill, ...(range === "all" ? styles.pillOn : {}) }}>
+              All
+            </button>
+          </div>
 
           <button onClick={loadAll} disabled={loading} style={styles.btnGhost}>
             {loading ? "Refreshing..." : "Refresh"}
@@ -305,7 +335,6 @@ export default function CalendarPage() {
               value={form.end_at}
               onChange={(e) => setForm((p) => ({ ...p, end_at: e.target.value }))}
               style={styles.input}
-              placeholder="End (optional)"
             />
           </div>
 
@@ -327,22 +356,12 @@ export default function CalendarPage() {
           <button type="submit" style={styles.btnPrimary} disabled={contacts.length === 0}>
             Add Event
           </button>
-
-          {contacts.length === 0 ? (
-            <div style={{ marginTop: 6, opacity: 0.75, fontSize: 12 }}>
-              Add a contact first in{" "}
-              <Link href="/dashboard/contacts" style={{ color: "white", fontWeight: 900 }}>
-                Contacts
-              </Link>
-              .
-            </div>
-          ) : null}
         </form>
       </div>
 
       <div style={{ marginTop: 18 }}>
         <h2 style={styles.h2}>
-          Events {loading ? "(loading...)" : `(${events.length})`}
+          Events {loading ? "(loading…)" : `(${events.length})`}
         </h2>
 
         {loading ? (
@@ -350,50 +369,64 @@ export default function CalendarPage() {
         ) : events.length === 0 ? (
           <div style={{ opacity: 0.75 }}>No events yet.</div>
         ) : (
-          <div style={{ display: "grid", gap: 10, marginTop: 10 }}>
-            {events.map((ev) => {
-              const c = ev.contacts;
-              const d = ev.deals;
-
-              const contactName = c
-                ? `${c.first_name || ""} ${c.last_name || ""}`.trim() || "Unnamed"
-                : "No contact";
-
-              const start = ev.start_at ? new Date(ev.start_at).toLocaleString() : "";
-              const end = ev.end_at ? new Date(ev.end_at).toLocaleString() : "";
+          <div style={{ display: "grid", gap: 14, marginTop: 10 }}>
+            {groupKeys.map((k) => {
+              const dateLabel = new Date(k).toLocaleDateString(undefined, {
+                weekday: "long",
+                month: "short",
+                day: "numeric",
+              });
 
               return (
-                <div key={ev.id} style={styles.item}>
-                  <div style={styles.itemTop}>
-                    <div style={{ display: "grid", gap: 6, minWidth: 0 }}>
-                      <div style={{ fontWeight: 950 }}>{ev.title}</div>
-                      <div style={styles.meta}>
-                        {start}
-                        {end ? ` → ${end}` : ""}{" "}
-                        {ev.location ? ` • ${ev.location}` : ""}
-                      </div>
-                      <div style={styles.meta}>
-                        Contact:{" "}
-                        {ev.contact_id ? (
-                          <Link href={`/dashboard/contacts/${ev.contact_id}`} style={styles.link}>
-                            {contactName}
-                          </Link>
-                        ) : (
-                          <span>{contactName}</span>
-                        )}
-                        {d?.title ? (
-                          <>
-                            {" "}
-                            • Deal: <b>{d.title}</b>
-                          </>
-                        ) : null}
-                      </div>
-                      {ev.notes ? <div style={{ opacity: 0.8, fontSize: 13 }}>{ev.notes}</div> : null}
-                    </div>
+                <div key={k} style={styles.group}>
+                  <div style={styles.groupTitle}>{dateLabel}</div>
+                  <div style={{ display: "grid", gap: 10, marginTop: 10 }}>
+                    {grouped[k].map((ev) => {
+                      const c = ev.contacts;
+                      const d = ev.deals;
 
-                    <button onClick={() => deleteEvent(ev.id)} style={styles.btnDanger}>
-                      Delete
-                    </button>
+                      const contactName = c
+                        ? `${c.first_name || ""} ${c.last_name || ""}`.trim() || "Unnamed"
+                        : "No contact";
+
+                      const start = ev.start_at ? new Date(ev.start_at).toLocaleString() : "";
+                      const end = ev.end_at ? new Date(ev.end_at).toLocaleString() : "";
+
+                      return (
+                        <div key={ev.id} style={styles.item}>
+                          <div style={styles.itemTop}>
+                            <div style={{ display: "grid", gap: 6, minWidth: 0 }}>
+                              <div style={{ fontWeight: 950 }}>{ev.title}</div>
+                              <div style={styles.meta}>
+                                {start}
+                                {end ? ` → ${end}` : ""} {ev.location ? ` • ${ev.location}` : ""}
+                              </div>
+                              <div style={styles.meta}>
+                                Contact:{" "}
+                                {ev.contact_id ? (
+                                  <Link href={`/dashboard/contacts/${ev.contact_id}`} style={styles.link}>
+                                    {contactName}
+                                  </Link>
+                                ) : (
+                                  <span>{contactName}</span>
+                                )}
+                                {d?.title ? (
+                                  <>
+                                    {" "}
+                                    • Deal: <b>{d.title}</b>
+                                  </>
+                                ) : null}
+                              </div>
+                              {ev.notes ? <div style={{ opacity: 0.8, fontSize: 13 }}>{ev.notes}</div> : null}
+                            </div>
+
+                            <button onClick={() => deleteEvent(ev.id)} style={styles.btnDanger}>
+                              Delete
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               );
@@ -419,6 +452,21 @@ const styles = {
     fontWeight: 900,
     fontSize: 12,
   },
+
+  pills: { display: "flex", gap: 8, alignItems: "center" },
+  pill: {
+    padding: "8px 12px",
+    borderRadius: 999,
+    border: "1px solid rgba(255,255,255,0.16)",
+    background: "rgba(255,255,255,0.04)",
+    color: "white",
+    cursor: "pointer",
+    fontWeight: 900,
+    fontSize: 13,
+    opacity: 0.85,
+  },
+  pillOn: { background: "rgba(255,255,255,0.10)", opacity: 1 },
+
   h2: { margin: 0, fontSize: 18, fontWeight: 900 },
   card: {
     marginTop: 18,
@@ -445,17 +493,6 @@ const styles = {
     color: "white",
     outline: "none",
   },
-  selectSmall: {
-    padding: "10px 12px",
-    borderRadius: 999,
-    border: "1px solid rgba(255,255,255,0.16)",
-    background: "rgba(255,255,255,0.06)",
-    color: "white",
-    outline: "none",
-    fontWeight: 900,
-    fontSize: 13,
-    cursor: "pointer",
-  },
   textarea: {
     padding: 12,
     borderRadius: 12,
@@ -465,6 +502,7 @@ const styles = {
     outline: "none",
     resize: "vertical",
   },
+
   btnGhost: {
     padding: "10px 14px",
     borderRadius: 999,
@@ -496,6 +534,15 @@ const styles = {
     fontSize: 13,
     height: "fit-content",
   },
+
+  group: {
+    padding: 14,
+    borderRadius: 16,
+    border: "1px solid #242424",
+    background: "#101010",
+  },
+  groupTitle: { fontWeight: 950, opacity: 0.9 },
+
   item: {
     padding: 14,
     borderRadius: 16,
@@ -505,6 +552,7 @@ const styles = {
   itemTop: { display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" },
   meta: { opacity: 0.75, fontSize: 13, lineHeight: 1.4 },
   link: { color: "white", fontWeight: 950, textDecoration: "underline" },
+
   alert: {
     marginTop: 14,
     padding: 12,

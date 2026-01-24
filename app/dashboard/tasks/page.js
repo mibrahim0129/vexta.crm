@@ -4,6 +4,19 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { supabaseBrowser } from "@/lib/supabaseBrowser";
 
+function getDueBadge(dueAtIso, completed) {
+  if (completed) return { text: "Completed", tone: "muted" };
+  if (!dueAtIso) return { text: "No due date", tone: "muted" };
+
+  const now = Date.now();
+  const due = new Date(dueAtIso).getTime();
+  const diff = due - now;
+
+  if (diff < 0) return { text: "Overdue", tone: "danger" };
+  if (diff <= 1000 * 60 * 60 * 24) return { text: "Due soon", tone: "warn" };
+  return { text: "Later", tone: "ok" };
+}
+
 export default function TasksPage() {
   const sb = useMemo(() => supabaseBrowser(), []);
   const mountedRef = useRef(false);
@@ -23,7 +36,7 @@ export default function TasksPage() {
     deal_id: "",
     title: "",
     description: "",
-    due_at: "", // datetime-local string
+    due_at: "",
   });
 
   async function requireSession() {
@@ -56,7 +69,6 @@ export default function TasksPage() {
 
     const { data, error } = await q;
     if (error) throw error;
-
     setDeals(Array.isArray(data) ? data : []);
   }
 
@@ -66,6 +78,7 @@ export default function TasksPage() {
 
     setErr("");
     setLoading(true);
+
     try {
       let q = sb
         .from("tasks")
@@ -197,7 +210,6 @@ export default function TasksPage() {
   }
 
   useEffect(() => {
-    // when contact selection changes, refresh deals dropdown
     if (!form.contact_id) return;
     (async () => {
       await loadDeals(form.contact_id);
@@ -217,12 +229,6 @@ export default function TasksPage() {
         .on("postgres_changes", { event: "*", schema: "public", table: "tasks" }, () => {
           if (mountedRef.current) loadTasks();
         })
-        .on("postgres_changes", { event: "*", schema: "public", table: "contacts" }, () => {
-          if (mountedRef.current) loadAll();
-        })
-        .on("postgres_changes", { event: "*", schema: "public", table: "deals" }, () => {
-          if (mountedRef.current) loadAll();
-        })
         .subscribe((status) => setRtStatus(String(status || "").toLowerCase()));
 
       return () => {
@@ -238,18 +244,24 @@ export default function TasksPage() {
     <div>
       <div style={styles.header}>
         <div>
-          <h1 style={styles.h1}>Tasks & Reminders</h1>
-          <p style={styles.sub}>
+          <h1 style={styles.h1}>Tasks</h1>
+          <div style={styles.sub}>
             Realtime: <span style={styles.badge}>{rtStatus}</span>
-          </p>
+          </div>
         </div>
 
         <div style={styles.headerRight}>
-          <select value={filter} onChange={(e) => setFilter(e.target.value)} style={styles.selectSmall}>
-            <option value="open">Open</option>
-            <option value="completed">Completed</option>
-            <option value="all">All</option>
-          </select>
+          <div style={styles.pills}>
+            <button onClick={() => setFilter("open")} style={{ ...styles.pill, ...(filter === "open" ? styles.pillOn : {}) }}>
+              Open
+            </button>
+            <button onClick={() => setFilter("completed")} style={{ ...styles.pill, ...(filter === "completed" ? styles.pillOn : {}) }}>
+              Completed
+            </button>
+            <button onClick={() => setFilter("all")} style={{ ...styles.pill, ...(filter === "all" ? styles.pillOn : {}) }}>
+              All
+            </button>
+          </div>
 
           <button onClick={loadAll} disabled={loading} style={styles.btnGhost}>
             {loading ? "Refreshing..." : "Refresh"}
@@ -339,7 +351,7 @@ export default function TasksPage() {
 
       <div style={{ marginTop: 18 }}>
         <h2 style={styles.h2}>
-          Tasks {loading ? "(loading...)" : `(${tasks.length})`}
+          Tasks {loading ? "(loading…)" : `(${tasks.length})`}
         </h2>
 
         {loading ? (
@@ -356,15 +368,28 @@ export default function TasksPage() {
                 ? `${c.first_name || ""} ${c.last_name || ""}`.trim() || "Unnamed"
                 : "No contact";
 
-              const due = t.due_at ? new Date(t.due_at).toLocaleString() : "No due date";
+              const dueText = t.due_at ? new Date(t.due_at).toLocaleString() : "No due date";
+              const badge = getDueBadge(t.due_at, t.completed);
 
               return (
                 <div key={t.id} style={styles.item}>
                   <div style={styles.itemTop}>
                     <div style={{ display: "grid", gap: 4, minWidth: 0 }}>
-                      <div style={{ fontWeight: 950, textDecoration: t.completed ? "line-through" : "none" }}>
-                        {t.title}
+                      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                        <div style={{ fontWeight: 950, textDecoration: t.completed ? "line-through" : "none" }}>
+                          {t.title}
+                        </div>
+                        <span
+                          style={{
+                            ...styles.duePill,
+                            ...(badge.tone === "danger" ? styles.dueDanger : {}),
+                            ...(badge.tone === "warn" ? styles.dueWarn : {}),
+                          }}
+                        >
+                          {badge.text}
+                        </span>
                       </div>
+
                       <div style={styles.meta}>
                         Contact:{" "}
                         {t.contact_id ? (
@@ -381,8 +406,9 @@ export default function TasksPage() {
                           </>
                         ) : null}
                         {" "}
-                        • Due: <b>{due}</b>
+                        • Due: <b>{dueText}</b>
                       </div>
+
                       {t.description ? <div style={{ opacity: 0.8, fontSize: 13 }}>{t.description}</div> : null}
                     </div>
 
@@ -422,6 +448,20 @@ const styles = {
     fontWeight: 900,
     fontSize: 12,
   },
+  pills: { display: "flex", gap: 8, alignItems: "center" },
+  pill: {
+    padding: "8px 12px",
+    borderRadius: 999,
+    border: "1px solid rgba(255,255,255,0.16)",
+    background: "rgba(255,255,255,0.04)",
+    color: "white",
+    cursor: "pointer",
+    fontWeight: 900,
+    fontSize: 13,
+    opacity: 0.85,
+  },
+  pillOn: { background: "rgba(255,255,255,0.10)", opacity: 1 },
+
   h2: { margin: 0, fontSize: 18, fontWeight: 900 },
   card: {
     marginTop: 18,
@@ -448,17 +488,6 @@ const styles = {
     color: "white",
     outline: "none",
   },
-  selectSmall: {
-    padding: "10px 12px",
-    borderRadius: 999,
-    border: "1px solid rgba(255,255,255,0.16)",
-    background: "rgba(255,255,255,0.06)",
-    color: "white",
-    outline: "none",
-    fontWeight: 900,
-    fontSize: 13,
-    cursor: "pointer",
-  },
   textarea: {
     padding: 12,
     borderRadius: 12,
@@ -468,6 +497,7 @@ const styles = {
     outline: "none",
     resize: "vertical",
   },
+
   btnGhost: {
     padding: "10px 14px",
     borderRadius: 999,
@@ -509,6 +539,7 @@ const styles = {
     fontSize: 13,
     height: "fit-content",
   },
+
   item: {
     padding: 14,
     borderRadius: 16,
@@ -518,6 +549,29 @@ const styles = {
   itemTop: { display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" },
   meta: { opacity: 0.75, fontSize: 13, lineHeight: 1.4 },
   link: { color: "white", fontWeight: 950, textDecoration: "underline" },
+
+  duePill: {
+    padding: "3px 10px",
+    borderRadius: 999,
+    border: "1px solid rgba(255,255,255,0.16)",
+    background: "rgba(255,255,255,0.06)",
+    fontSize: 12,
+    fontWeight: 950,
+    opacity: 0.9,
+  },
+  dueDanger: {
+    border: "1px solid rgba(239,68,68,0.35)",
+    background: "rgba(239,68,68,0.12)",
+    color: "#fecaca",
+    opacity: 1,
+  },
+  dueWarn: {
+    border: "1px solid rgba(245,158,11,0.35)",
+    background: "rgba(245,158,11,0.10)",
+    color: "#fde68a",
+    opacity: 1,
+  },
+
   alert: {
     marginTop: 14,
     padding: 12,
