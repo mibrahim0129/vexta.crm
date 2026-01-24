@@ -100,7 +100,7 @@ export default function SettingsPage() {
             </div>
 
             <button onClick={logout} style={styles.btnGhost}>
-              Logout (alternate)
+              Logout
             </button>
           </div>
         </div>
