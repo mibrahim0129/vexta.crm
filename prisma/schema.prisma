@@ -1,0 +1,21 @@
+generator client {
+  provider   = "prisma-client-js"
+  engineType = "binary"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model Contact {
+  id        String   @id @default(cuid())
+  userId    String   @default("demo")
+  name      String
+  phone     String?
+  email     String?
+  type      String   @default("buyer")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+}
