@@ -1,565 +1,404 @@
 "use client";
 
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
 import { supabaseBrowser } from "@/lib/supabaseBrowser";
-
-function startOfToday() {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  return d;
-}
-function endOfToday() {
-  const d = new Date();
-  d.setHours(23, 59, 59, 999);
-  return d;
-}
-function endOfWeek() {
-  const d = startOfToday();
-  const day = d.getDay(); // 0 Sun
-  const diff = 6 - day;
-  d.setDate(d.getDate() + diff);
-  d.setHours(23, 59, 59, 999);
-  return d;
-}
 
 export default function CalendarPage() {
   const sb = useMemo(() => supabaseBrowser(), []);
-  const mountedRef = useRef(false);
-
   const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState("");
-  const [rtStatus, setRtStatus] = useState("connecting");
 
+  const [events, setEvents] = useState([]);
   const [contacts, setContacts] = useState([]);
   const [deals, setDeals] = useState([]);
-  const [events, setEvents] = useState([]);
 
-  const [range, setRange] = useState("week"); // today | week | all
+  const [title, setTitle] = useState("");
+  const [startsAt, setStartsAt] = useState("");
+  const [endsAt, setEndsAt] = useState("");
+  const [contactId, setContactId] = useState("");
+  const [dealId, setDealId] = useState("");
 
-  const [form, setForm] = useState({
-    contact_id: "",
-    deal_id: "",
-    title: "",
-    location: "",
-    start_at: "",
-    end_at: "",
-    notes: "",
-  });
+  const [view, setView] = useState("week"); // today | week | all
 
-  async function requireSession() {
-    const { data } = await sb.auth.getSession();
-    if (!data?.session) {
-      window.location.href = "/login?next=/dashboard/calendar";
-      return null;
-    }
-    return data.session;
-  }
-
-  async function loadContacts() {
-    const { data, error } = await sb
-      .from("contacts")
-      .select("id, first_name, last_name")
-      .order("created_at", { ascending: false });
-    if (error) throw error;
-
-    const list = Array.isArray(data) ? data : [];
-    setContacts(list);
-
-    if (!form.contact_id && list.length > 0) {
-      setForm((p) => ({ ...p, contact_id: list[0].id }));
-    }
-  }
-
-  async function loadDeals(contactId) {
-    let q = sb.from("deals").select("id, title, contact_id").order("created_at", { ascending: false });
-    if (contactId) q = q.eq("contact_id", contactId);
-
-    const { data, error } = await q;
-    if (error) throw error;
-
-    setDeals(Array.isArray(data) ? data : []);
-  }
-
-  async function loadEvents() {
-    const session = await requireSession();
-    if (!session) return;
-
-    setErr("");
+  async function loadAll() {
     setLoading(true);
-
     try {
-      let q = sb
-        .from("calendar_events")
-        .select(
-          `
-          id, title, location, start_at, end_at, notes, created_at,
-          contact_id, deal_id,
-          contacts:contact_id ( id, first_name, last_name ),
-          deals:deal_id ( id, title )
-        `
-        )
-        .order("start_at", { ascending: true });
+      const [{ data: ev }, { data: cs }, { data: ds }] = await Promise.all([
+        sb.from("calendar_events").select("*").order("starts_at", { ascending: true }),
+        sb.from("contacts").select("id, name").order("name", { ascending: true }),
+        sb.from("deals").select("id, title, contact_id").order("created_at", { ascending: false }),
+      ]);
 
-      if (range === "today") {
-        q = q.gte("start_at", startOfToday().toISOString()).lte("start_at", endOfToday().toISOString());
-      } else if (range === "week") {
-        q = q.gte("start_at", startOfToday().toISOString()).lte("start_at", endOfWeek().toISOString());
-      }
-
-      const { data, error } = await q;
-      if (error) throw error;
-
-      setEvents(Array.isArray(data) ? data : []);
+      setEvents(Array.isArray(ev) ? ev : []);
+      setContacts(Array.isArray(cs) ? cs : []);
+      setDeals(Array.isArray(ds) ? ds : []);
     } catch (e) {
       console.error(e);
-      setErr(e?.message || "Failed to load events");
       setEvents([]);
     } finally {
       setLoading(false);
     }
   }
 
-  async function loadAll() {
-    setErr("");
-    setLoading(true);
-    try {
-      const session = await requireSession();
-      if (!session) return;
-
-      await loadContacts();
-      const cid = form.contact_id || null;
-      await loadDeals(cid);
-      await loadEvents();
-    } catch (e) {
-      console.error(e);
-      setErr(e?.message || "Failed to load data");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function addEvent(e) {
-    e.preventDefault();
-    setErr("");
-
-    const title = form.title.trim();
-    if (!title) return setErr("Event title is required.");
-    if (!form.start_at) return setErr("Start date/time is required.");
-
-    try {
-      const session = await requireSession();
-      if (!session) return;
-
-      const startIso = new Date(form.start_at).toISOString();
-      const endIso = form.end_at ? new Date(form.end_at).toISOString() : null;
-
-      const { data, error } = await sb
-        .from("calendar_events")
-        .insert([
-          {
-            user_id: session.user.id,
-            contact_id: form.contact_id || null,
-            deal_id: form.deal_id || null,
-            title,
-            location: form.location.trim() || null,
-            start_at: startIso,
-            end_at: endIso,
-            notes: form.notes.trim() || null,
-          },
-        ])
-        .select(
-          `
-          id, title, location, start_at, end_at, notes, created_at,
-          contact_id, deal_id,
-          contacts:contact_id ( id, first_name, last_name ),
-          deals:deal_id ( id, title )
-        `
-        )
-        .single();
-
-      if (error) throw error;
-
-      setEvents((p) => [...p, data].sort((a, b) => new Date(a.start_at) - new Date(b.start_at)));
-      setForm((p) => ({ ...p, title: "", location: "", start_at: "", end_at: "", notes: "" }));
-    } catch (e) {
-      console.error(e);
-      setErr(e?.message || "Failed to add event");
-    }
-  }
-
-  async function deleteEvent(id) {
-    setErr("");
-    const ok = confirm("Delete this event?");
-    if (!ok) return;
-
-    try {
-      const session = await requireSession();
-      if (!session) return;
-
-      const { error } = await sb.from("calendar_events").delete().eq("id", id);
-      if (error) throw error;
-
-      setEvents((p) => p.filter((x) => x.id !== id));
-    } catch (e) {
-      console.error(e);
-      setErr(e?.message || "Failed to delete event");
-    }
-  }
-
   useEffect(() => {
-    if (!form.contact_id) return;
-    (async () => {
-      await loadDeals(form.contact_id);
-      setForm((p) => ({ ...p, deal_id: "" }));
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [form.contact_id]);
+    loadAll();
 
-  useEffect(() => {
-    mountedRef.current = true;
+    const channel = sb
+      .channel("calendar-live")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "calendar_events" },
+        () => loadAll()
+      )
+      .subscribe();
 
-    (async () => {
-      await loadAll();
-
-      const channel = sb.channel("calendar-rt");
-      channel
-        .on("postgres_changes", { event: "*", schema: "public", table: "calendar_events" }, () => {
-          if (mountedRef.current) loadEvents();
-        })
-        .subscribe((status) => setRtStatus(String(status || "").toLowerCase()));
-
-      return () => {
-        mountedRef.current = false;
-        sb.removeChannel(channel);
-      };
-    })();
-
+    return () => {
+      sb.removeChannel(channel);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const grouped = events.reduce((acc, ev) => {
-    const dayKey = new Date(ev.start_at).toDateString();
-    acc[dayKey] = acc[dayKey] || [];
-    acc[dayKey].push(ev);
-    return acc;
-  }, {});
-  const groupKeys = Object.keys(grouped);
+  async function addEvent(e) {
+    e.preventDefault();
+    const t = title.trim();
+    if (!t) return;
+    if (!startsAt) return alert("Pick a start time");
+
+    try {
+      await sb.from("calendar_events").insert({
+        title: t,
+        starts_at: startsAt,
+        ends_at: endsAt || null,
+        contact_id: contactId || null,
+        deal_id: dealId || null,
+      });
+
+      setTitle("");
+      setStartsAt("");
+      setEndsAt("");
+      setContactId("");
+      setDealId("");
+    } catch (e2) {
+      console.error(e2);
+      alert("Failed to add event");
+    }
+  }
+
+  async function removeEvent(id) {
+    if (!confirm("Delete this event?")) return;
+    try {
+      await sb.from("calendar_events").delete().eq("id", id);
+    } catch (e) {
+      console.error(e);
+      alert("Failed to delete event");
+    }
+  }
+
+  const contactNameById = useMemo(() => {
+    const m = new Map();
+    contacts.forEach((c) => m.set(c.id, c.name));
+    return m;
+  }, [contacts]);
+
+  const dealTitleById = useMemo(() => {
+    const m = new Map();
+    deals.forEach((d) => m.set(d.id, d.title));
+    return m;
+  }, [deals]);
+
+  const filtered = useMemo(() => {
+    const now = new Date();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+    if (view === "all") return events;
+
+    if (view === "today") {
+      const end = new Date(startOfToday);
+      end.setDate(end.getDate() + 1);
+      return events.filter((ev) => {
+        const s = new Date(ev.starts_at);
+        return s >= startOfToday && s < end;
+      });
+    }
+
+    // week
+    const end = new Date(startOfToday);
+    end.setDate(end.getDate() + 7);
+
+    return events.filter((ev) => {
+      const s = new Date(ev.starts_at);
+      return s >= startOfToday && s < end;
+    });
+  }, [events, view]);
+
+  const grouped = useMemo(() => {
+    const map = new Map();
+    filtered.forEach((ev) => {
+      const d = new Date(ev.starts_at);
+      const key = d.toDateString();
+      if (!map.has(key)) map.set(key, []);
+      map.get(key).push(ev);
+    });
+    return Array.from(map.entries()).map(([k, arr]) => [k, arr]);
+  }, [filtered]);
 
   return (
-    <div>
-      <div style={styles.header}>
+    <div style={styles.page}>
+      <div style={styles.headerRow}>
         <div>
           <h1 style={styles.h1}>Calendar</h1>
-          <div style={styles.sub}>
-            Realtime: <span style={styles.badge}>{rtStatus}</span>
-          </div>
+          <div style={styles.sub}>Events tied to contacts & deals.</div>
         </div>
 
-        <div style={styles.headerRight}>
-          <div style={styles.pills}>
-            <button onClick={() => setRange("today")} style={{ ...styles.pill, ...(range === "today" ? styles.pillOn : {}) }}>
-              Today
-            </button>
-            <button onClick={() => setRange("week")} style={{ ...styles.pill, ...(range === "week" ? styles.pillOn : {}) }}>
-              This Week
-            </button>
-            <button onClick={() => setRange("all")} style={{ ...styles.pill, ...(range === "all" ? styles.pillOn : {}) }}>
-              All
-            </button>
-          </div>
-
-          <button onClick={loadAll} disabled={loading} style={styles.btnGhost}>
-            {loading ? "Refreshing..." : "Refresh"}
+        <div style={styles.headerBtns}>
+          <button onClick={loadAll} style={styles.btn}>
+            Refresh
           </button>
+          <Link href="/dashboard/tasks" style={styles.btnGhost}>
+            Tasks
+          </Link>
         </div>
       </div>
 
-      {err ? <div style={styles.alert}>{err}</div> : null}
+      <div style={styles.grid}>
+        <div style={styles.card}>
+          <div style={styles.cardTitle}>Add event</div>
 
-      <div style={styles.card}>
-        <h2 style={styles.h2}>Add Event</h2>
+          <form onSubmit={addEvent} style={styles.form}>
+            <input
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              style={styles.input}
+              placeholder="Event title (showing, call, inspection, closing...)"
+            />
 
-        <form onSubmit={addEvent} style={styles.form}>
-          <div style={styles.grid2}>
-            <select
-              value={form.contact_id}
-              onChange={(e) => setForm((p) => ({ ...p, contact_id: e.target.value }))}
-              style={styles.select}
-            >
-              {contacts.length === 0 ? (
-                <option value="">No contacts found</option>
-              ) : (
-                contacts.map((c) => {
-                  const name = `${c.first_name || ""} ${c.last_name || ""}`.trim() || "Unnamed";
-                  return (
-                    <option key={c.id} value={c.id}>
-                      {name}
-                    </option>
-                  );
-                })
-              )}
-            </select>
+            <div style={styles.row2}>
+              <input
+                value={startsAt}
+                onChange={(e) => setStartsAt(e.target.value)}
+                style={styles.input}
+                type="datetime-local"
+              />
+              <input
+                value={endsAt}
+                onChange={(e) => setEndsAt(e.target.value)}
+                style={styles.input}
+                type="datetime-local"
+              />
+            </div>
 
-            <select
-              value={form.deal_id}
-              onChange={(e) => setForm((p) => ({ ...p, deal_id: e.target.value }))}
-              style={styles.select}
-              disabled={deals.length === 0}
-            >
-              <option value="">No deal (optional)</option>
-              {deals.map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.title}
-                </option>
+            <div style={styles.row2}>
+              <select
+                value={contactId}
+                onChange={(e) => setContactId(e.target.value)}
+                style={styles.select}
+              >
+                <option value="">Link to Contact (optional)</option>
+                {contacts.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+
+              <select
+                value={dealId}
+                onChange={(e) => setDealId(e.target.value)}
+                style={styles.select}
+              >
+                <option value="">Link to Deal (optional)</option>
+                {deals.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.title}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <button style={styles.primary} type="submit">
+              Add Event
+            </button>
+          </form>
+        </div>
+
+        <div style={styles.card}>
+          <div style={styles.controls}>
+            <div style={styles.tabs}>
+              {["today", "week", "all"].map((t) => (
+                <button
+                  key={t}
+                  onClick={() => setView(t)}
+                  style={{ ...styles.tab, ...(view === t ? styles.tabActive : {}) }}
+                  type="button"
+                >
+                  {t.toUpperCase()}
+                </button>
               ))}
-            </select>
+            </div>
           </div>
 
-          <input
-            value={form.title}
-            onChange={(e) => setForm((p) => ({ ...p, title: e.target.value }))}
-            placeholder="Event title (ex: Showing at 3PM)"
-            style={styles.input}
-          />
-
-          <div style={styles.grid2}>
-            <input
-              type="datetime-local"
-              value={form.start_at}
-              onChange={(e) => setForm((p) => ({ ...p, start_at: e.target.value }))}
-              style={styles.input}
-            />
-            <input
-              type="datetime-local"
-              value={form.end_at}
-              onChange={(e) => setForm((p) => ({ ...p, end_at: e.target.value }))}
-              style={styles.input}
-            />
-          </div>
-
-          <input
-            value={form.location}
-            onChange={(e) => setForm((p) => ({ ...p, location: e.target.value }))}
-            placeholder="Location (optional)"
-            style={styles.input}
-          />
-
-          <textarea
-            value={form.notes}
-            onChange={(e) => setForm((p) => ({ ...p, notes: e.target.value }))}
-            placeholder="Notes (optional)"
-            style={styles.textarea}
-            rows={3}
-          />
-
-          <button type="submit" style={styles.btnPrimary} disabled={contacts.length === 0}>
-            Add Event
-          </button>
-        </form>
-      </div>
-
-      <div style={{ marginTop: 18 }}>
-        <h2 style={styles.h2}>
-          Events {loading ? "(loading…)" : `(${events.length})`}
-        </h2>
-
-        {loading ? (
-          <div style={{ opacity: 0.75 }}>Loading…</div>
-        ) : events.length === 0 ? (
-          <div style={{ opacity: 0.75 }}>No events yet.</div>
-        ) : (
-          <div style={{ display: "grid", gap: 14, marginTop: 10 }}>
-            {groupKeys.map((k) => {
-              const dateLabel = new Date(k).toLocaleDateString(undefined, {
-                weekday: "long",
-                month: "short",
-                day: "numeric",
-              });
-
-              return (
-                <div key={k} style={styles.group}>
-                  <div style={styles.groupTitle}>{dateLabel}</div>
-                  <div style={{ display: "grid", gap: 10, marginTop: 10 }}>
-                    {grouped[k].map((ev) => {
-                      const c = ev.contacts;
-                      const d = ev.deals;
-
-                      const contactName = c
-                        ? `${c.first_name || ""} ${c.last_name || ""}`.trim() || "Unnamed"
-                        : "No contact";
-
-                      const start = ev.start_at ? new Date(ev.start_at).toLocaleString() : "";
-                      const end = ev.end_at ? new Date(ev.end_at).toLocaleString() : "";
+          <div style={styles.list}>
+            {loading ? (
+              <div style={styles.muted}>Loading…</div>
+            ) : filtered.length === 0 ? (
+              <div style={styles.muted}>No events in this view.</div>
+            ) : (
+              grouped.map(([day, items]) => (
+                <div key={day} style={styles.group}>
+                  <div style={styles.groupTitle}>{day}</div>
+                  <div style={{ display: "grid", gap: 10 }}>
+                    {items.map((ev) => {
+                      const s = new Date(ev.starts_at).toLocaleString();
+                      const e = ev.ends_at ? new Date(ev.ends_at).toLocaleString() : "";
+                      const cn = contactNameById.get(ev.contact_id);
+                      const dt = dealTitleById.get(ev.deal_id);
 
                       return (
                         <div key={ev.id} style={styles.item}>
-                          <div style={styles.itemTop}>
-                            <div style={{ display: "grid", gap: 6, minWidth: 0 }}>
-                              <div style={{ fontWeight: 950 }}>{ev.title}</div>
-                              <div style={styles.meta}>
-                                {start}
-                                {end ? ` → ${end}` : ""} {ev.location ? ` • ${ev.location}` : ""}
-                              </div>
-                              <div style={styles.meta}>
-                                Contact:{" "}
-                                {ev.contact_id ? (
-                                  <Link href={`/dashboard/contacts/${ev.contact_id}`} style={styles.link}>
-                                    {contactName}
-                                  </Link>
-                                ) : (
-                                  <span>{contactName}</span>
-                                )}
-                                {d?.title ? (
-                                  <>
-                                    {" "}
-                                    • Deal: <b>{d.title}</b>
-                                  </>
-                                ) : null}
-                              </div>
-                              {ev.notes ? <div style={{ opacity: 0.8, fontSize: 13 }}>{ev.notes}</div> : null}
+                          <div style={{ minWidth: 0 }}>
+                            <div style={styles.title}>{ev.title}</div>
+                            <div style={styles.meta}>
+                              <span>Start: {s}</span>
+                              {e ? <span>• End: {e}</span> : null}
+                              {cn ? <span>• Contact: {cn}</span> : null}
+                              {dt ? <span>• Deal: {dt}</span> : null}
                             </div>
-
-                            <button onClick={() => deleteEvent(ev.id)} style={styles.btnDanger}>
-                              Delete
-                            </button>
                           </div>
+                          <button onClick={() => removeEvent(ev.id)} style={styles.trash} type="button">
+                            Delete
+                          </button>
                         </div>
                       );
                     })}
                   </div>
                 </div>
-              );
-            })}
+              ))
+            )}
           </div>
-        )}
+        </div>
       </div>
     </div>
   );
 }
 
 const styles = {
-  header: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 },
-  headerRight: { display: "flex", gap: 10, alignItems: "center" },
-  h1: { margin: 0, fontSize: 28, fontWeight: 950 },
-  sub: { marginTop: 6, opacity: 0.75 },
-  badge: {
-    display: "inline-block",
-    padding: "2px 10px",
-    borderRadius: 999,
+  page: { color: "white" },
+  headerRow: {
+    display: "flex",
+    alignItems: "flex-end",
+    justifyContent: "space-between",
+    gap: 12,
+    marginBottom: 14,
+  },
+  h1: { margin: 0, fontSize: 34, letterSpacing: -0.6 },
+  sub: { opacity: 0.7, fontWeight: 800, marginTop: 6 },
+
+  headerBtns: { display: "flex", gap: 10, flexWrap: "wrap" },
+  btn: {
+    padding: "10px 14px",
+    borderRadius: 12,
     border: "1px solid rgba(255,255,255,0.16)",
     background: "rgba(255,255,255,0.06)",
-    fontWeight: 900,
-    fontSize: 12,
-  },
-
-  pills: { display: "flex", gap: 8, alignItems: "center" },
-  pill: {
-    padding: "8px 12px",
-    borderRadius: 999,
-    border: "1px solid rgba(255,255,255,0.16)",
-    background: "rgba(255,255,255,0.04)",
     color: "white",
+    fontWeight: 900,
     cursor: "pointer",
-    fontWeight: 900,
-    fontSize: 13,
-    opacity: 0.85,
   },
-  pillOn: { background: "rgba(255,255,255,0.10)", opacity: 1 },
-
-  h2: { margin: 0, fontSize: 18, fontWeight: 900 },
-  card: {
-    marginTop: 18,
-    padding: 16,
-    border: "1px solid #242424",
-    borderRadius: 16,
-    background: "#111111",
-  },
-  form: { marginTop: 12, display: "grid", gap: 10 },
-  grid2: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 },
-  input: {
-    padding: 12,
-    borderRadius: 12,
-    border: "1px solid #2a2a2a",
-    background: "#0f0f0f",
-    color: "white",
-    outline: "none",
-  },
-  select: {
-    padding: 12,
-    borderRadius: 12,
-    border: "1px solid #2a2a2a",
-    background: "#0f0f0f",
-    color: "white",
-    outline: "none",
-  },
-  textarea: {
-    padding: 12,
-    borderRadius: 12,
-    border: "1px solid #2a2a2a",
-    background: "#0f0f0f",
-    color: "white",
-    outline: "none",
-    resize: "vertical",
-  },
-
   btnGhost: {
     padding: "10px 14px",
-    borderRadius: 999,
-    border: "1px solid rgba(255,255,255,0.16)",
-    background: "rgba(255,255,255,0.06)",
-    color: "white",
-    cursor: "pointer",
-    fontWeight: 900,
-    fontSize: 13,
-  },
-  btnPrimary: {
-    padding: "12px 14px",
     borderRadius: 12,
-    border: "1px solid #f5f5f5",
-    background: "#f5f5f5",
-    color: "#0b0b0b",
-    fontWeight: 950,
+    border: "1px solid rgba(255,255,255,0.16)",
+    background: "transparent",
+    color: "white",
+    fontWeight: 900,
     cursor: "pointer",
-    width: "fit-content",
-  },
-  btnDanger: {
-    padding: "10px 12px",
-    borderRadius: 999,
-    border: "1px solid rgba(239,68,68,0.35)",
-    background: "rgba(239,68,68,0.10)",
-    color: "#fecaca",
-    cursor: "pointer",
-    fontWeight: 950,
-    fontSize: 13,
-    height: "fit-content",
+    textDecoration: "none",
+    display: "inline-flex",
+    alignItems: "center",
   },
 
-  group: {
+  grid: { display: "grid", gridTemplateColumns: "1fr 1.6fr", gap: 14 },
+  card: {
+    borderRadius: 18,
+    border: "1px solid rgba(255,255,255,0.12)",
+    background: "rgba(255,255,255,0.04)",
     padding: 14,
-    borderRadius: 16,
-    border: "1px solid #242424",
-    background: "#101010",
   },
+  cardTitle: { fontWeight: 950, marginBottom: 10 },
+
+  form: { display: "grid", gap: 10 },
+  row2: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 },
+
+  input: {
+    padding: "12px 12px",
+    borderRadius: 12,
+    border: "1px solid rgba(255,255,255,0.16)",
+    background: "rgba(0,0,0,0.25)",
+    color: "white",
+    outline: "none",
+    fontWeight: 800,
+  },
+  select: {
+    padding: "12px 12px",
+    borderRadius: 12,
+    border: "1px solid rgba(255,255,255,0.16)",
+    background: "rgba(0,0,0,0.25)",
+    color: "white",
+    outline: "none",
+    fontWeight: 800,
+  },
+  primary: {
+    padding: "12px 14px",
+    borderRadius: 12,
+    border: "1px solid rgba(255,255,255,0.16)",
+    background: "white",
+    color: "black",
+    fontWeight: 950,
+    cursor: "pointer",
+  },
+
+  controls: { display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" },
+  tabs: { display: "flex", gap: 8 },
+  tab: {
+    padding: "8px 10px",
+    borderRadius: 999,
+    border: "1px solid rgba(255,255,255,0.14)",
+    background: "rgba(255,255,255,0.06)",
+    color: "white",
+    fontWeight: 950,
+    cursor: "pointer",
+    fontSize: 12,
+  },
+  tabActive: {
+    background: "rgba(255,255,255,0.14)",
+    border: "1px solid rgba(255,255,255,0.22)",
+  },
+
+  list: { marginTop: 12, display: "grid", gap: 14 },
+  muted: { opacity: 0.7, fontWeight: 800, padding: 10 },
+
+  group: { display: "grid", gap: 10 },
   groupTitle: { fontWeight: 950, opacity: 0.9 },
 
   item: {
-    padding: 14,
-    borderRadius: 16,
-    border: "1px solid #242424",
-    background: "#111111",
-  },
-  itemTop: { display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" },
-  meta: { opacity: 0.75, fontSize: 13, lineHeight: 1.4 },
-  link: { color: "white", fontWeight: 950, textDecoration: "underline" },
-
-  alert: {
-    marginTop: 14,
+    display: "flex",
+    justifyContent: "space-between",
+    gap: 12,
     padding: 12,
+    borderRadius: 14,
+    border: "1px solid rgba(255,255,255,0.12)",
+    background: "rgba(0,0,0,0.25)",
+  },
+  title: { fontWeight: 950, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+  meta: { marginTop: 6, fontSize: 12, opacity: 0.75, display: "flex", gap: 8, flexWrap: "wrap" },
+
+  trash: {
     borderRadius: 12,
-    background: "#1a0f0f",
-    border: "1px solid #5a1f1f",
-    color: "#ffd6d6",
-    fontWeight: 900,
+    padding: "10px 12px",
+    border: "1px solid rgba(239,68,68,0.35)",
+    background: "rgba(239,68,68,0.10)",
+    color: "#fecaca",
+    fontWeight: 950,
+    cursor: "pointer",
+    flexShrink: 0,
   },
 };

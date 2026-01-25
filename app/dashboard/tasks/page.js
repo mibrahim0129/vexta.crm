@@ -1,584 +1,421 @@
 "use client";
 
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
 import { supabaseBrowser } from "@/lib/supabaseBrowser";
-
-function getDueBadge(dueAtIso, completed) {
-  if (completed) return { text: "Completed", tone: "muted" };
-  if (!dueAtIso) return { text: "No due date", tone: "muted" };
-
-  const now = Date.now();
-  const due = new Date(dueAtIso).getTime();
-  const diff = due - now;
-
-  if (diff < 0) return { text: "Overdue", tone: "danger" };
-  if (diff <= 1000 * 60 * 60 * 24) return { text: "Due soon", tone: "warn" };
-  return { text: "Later", tone: "ok" };
-}
 
 export default function TasksPage() {
   const sb = useMemo(() => supabaseBrowser(), []);
-  const mountedRef = useRef(false);
-
   const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState("");
-  const [rtStatus, setRtStatus] = useState("connecting");
+  const [rows, setRows] = useState([]);
+
+  const [title, setTitle] = useState("");
+  const [dueAt, setDueAt] = useState("");
+  const [contactId, setContactId] = useState("");
+  const [dealId, setDealId] = useState("");
 
   const [contacts, setContacts] = useState([]);
   const [deals, setDeals] = useState([]);
-  const [tasks, setTasks] = useState([]);
 
-  const [filter, setFilter] = useState("open"); // open | completed | all
-
-  const [form, setForm] = useState({
-    contact_id: "",
-    deal_id: "",
-    title: "",
-    description: "",
-    due_at: "",
-  });
-
-  async function requireSession() {
-    const { data } = await sb.auth.getSession();
-    if (!data?.session) {
-      window.location.href = "/login?next=/dashboard/tasks";
-      return null;
-    }
-    return data.session;
-  }
-
-  async function loadContacts() {
-    const { data, error } = await sb
-      .from("contacts")
-      .select("id, first_name, last_name")
-      .order("created_at", { ascending: false });
-    if (error) throw error;
-
-    const list = Array.isArray(data) ? data : [];
-    setContacts(list);
-
-    if (!form.contact_id && list.length > 0) {
-      setForm((p) => ({ ...p, contact_id: list[0].id }));
-    }
-  }
-
-  async function loadDeals(contactId) {
-    let q = sb.from("deals").select("id, title, contact_id").order("created_at", { ascending: false });
-    if (contactId) q = q.eq("contact_id", contactId);
-
-    const { data, error } = await q;
-    if (error) throw error;
-    setDeals(Array.isArray(data) ? data : []);
-  }
-
-  async function loadTasks() {
-    const session = await requireSession();
-    if (!session) return;
-
-    setErr("");
-    setLoading(true);
-
-    try {
-      let q = sb
-        .from("tasks")
-        .select(
-          `
-          id, title, description, due_at, completed, created_at,
-          contact_id, deal_id,
-          contacts:contact_id ( id, first_name, last_name ),
-          deals:deal_id ( id, title )
-        `
-        )
-        .order("completed", { ascending: true })
-        .order("due_at", { ascending: true, nullsFirst: false })
-        .order("created_at", { ascending: false });
-
-      if (filter === "open") q = q.eq("completed", false);
-      if (filter === "completed") q = q.eq("completed", true);
-
-      const { data, error } = await q;
-      if (error) throw error;
-
-      setTasks(Array.isArray(data) ? data : []);
-    } catch (e) {
-      console.error(e);
-      setErr(e?.message || "Failed to load tasks");
-      setTasks([]);
-    } finally {
-      setLoading(false);
-    }
-  }
+  const [filter, setFilter] = useState("open"); // open | done | all
+  const [search, setSearch] = useState("");
 
   async function loadAll() {
-    setErr("");
     setLoading(true);
     try {
-      const session = await requireSession();
-      if (!session) return;
+      const [{ data: tasksData }, { data: contactsData }, { data: dealsData }] =
+        await Promise.all([
+          sb.from("tasks").select("*").order("created_at", { ascending: false }),
+          sb.from("contacts").select("id, name").order("name", { ascending: true }),
+          sb.from("deals").select("id, title, contact_id").order("created_at", { ascending: false }),
+        ]);
 
-      await loadContacts();
-      const cid = form.contact_id || null;
-      await loadDeals(cid);
-      await loadTasks();
+      setRows(Array.isArray(tasksData) ? tasksData : []);
+      setContacts(Array.isArray(contactsData) ? contactsData : []);
+      setDeals(Array.isArray(dealsData) ? dealsData : []);
     } catch (e) {
       console.error(e);
-      setErr(e?.message || "Failed to load data");
+      setRows([]);
     } finally {
       setLoading(false);
     }
   }
 
-  async function addTask(e) {
-    e.preventDefault();
-    setErr("");
-
-    const title = form.title.trim();
-    if (!title) return setErr("Task title is required.");
-
-    const session = await requireSession();
-    if (!session) return;
-
-    try {
-      const dueAtIso = form.due_at ? new Date(form.due_at).toISOString() : null;
-
-      const { data, error } = await sb
-        .from("tasks")
-        .insert([
-          {
-            user_id: session.user.id,
-            contact_id: form.contact_id || null,
-            deal_id: form.deal_id || null,
-            title,
-            description: form.description.trim() || null,
-            due_at: dueAtIso,
-          },
-        ])
-        .select(
-          `
-          id, title, description, due_at, completed, created_at,
-          contact_id, deal_id,
-          contacts:contact_id ( id, first_name, last_name ),
-          deals:deal_id ( id, title )
-        `
-        )
-        .single();
-
-      if (error) throw error;
-
-      setTasks((p) => [data, ...p]);
-      setForm((p) => ({ ...p, title: "", description: "", due_at: "" }));
-    } catch (e) {
-      console.error(e);
-      setErr(e?.message || "Failed to add task");
-    }
-  }
-
-  async function toggleComplete(taskId, completed) {
-    setErr("");
-    try {
-      const session = await requireSession();
-      if (!session) return;
-
-      const { error } = await sb.from("tasks").update({ completed }).eq("id", taskId);
-      if (error) throw error;
-
-      setTasks((prev) => prev.map((t) => (t.id === taskId ? { ...t, completed } : t)));
-    } catch (e) {
-      console.error(e);
-      setErr(e?.message || "Failed to update task");
-    }
-  }
-
-  async function deleteTask(taskId) {
-    setErr("");
-    const ok = confirm("Delete this task?");
-    if (!ok) return;
-
-    try {
-      const session = await requireSession();
-      if (!session) return;
-
-      const { error } = await sb.from("tasks").delete().eq("id", taskId);
-      if (error) throw error;
-
-      setTasks((p) => p.filter((t) => t.id !== taskId));
-    } catch (e) {
-      console.error(e);
-      setErr(e?.message || "Failed to delete task");
-    }
-  }
-
   useEffect(() => {
-    if (!form.contact_id) return;
-    (async () => {
-      await loadDeals(form.contact_id);
-      setForm((p) => ({ ...p, deal_id: "" }));
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [form.contact_id]);
+    loadAll();
 
-  useEffect(() => {
-    mountedRef.current = true;
+    const channel = sb
+      .channel("tasks-live")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "tasks" },
+        () => loadAll()
+      )
+      .subscribe();
 
-    (async () => {
-      await loadAll();
-
-      const channel = sb.channel("tasks-rt");
-      channel
-        .on("postgres_changes", { event: "*", schema: "public", table: "tasks" }, () => {
-          if (mountedRef.current) loadTasks();
-        })
-        .subscribe((status) => setRtStatus(String(status || "").toLowerCase()));
-
-      return () => {
-        mountedRef.current = false;
-        sb.removeChannel(channel);
-      };
-    })();
-
+    return () => {
+      sb.removeChannel(channel);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  async function addTask(e) {
+    e.preventDefault();
+    const t = title.trim();
+    if (!t) return;
+
+    try {
+      await sb.from("tasks").insert({
+        title: t,
+        status: "open",
+        due_at: dueAt || null,
+        contact_id: contactId || null,
+        deal_id: dealId || null,
+      });
+
+      setTitle("");
+      setDueAt("");
+      setContactId("");
+      setDealId("");
+      // realtime will refresh
+    } catch (e) {
+      console.error(e);
+      alert("Failed to add task");
+    }
+  }
+
+  async function toggleDone(task) {
+    try {
+      const next = task.status === "done" ? "open" : "done";
+      await sb.from("tasks").update({ status: next }).eq("id", task.id);
+    } catch (e) {
+      console.error(e);
+      alert("Failed to update task");
+    }
+  }
+
+  async function removeTask(id) {
+    if (!confirm("Delete this task?")) return;
+    try {
+      await sb.from("tasks").delete().eq("id", id);
+    } catch (e) {
+      console.error(e);
+      alert("Failed to delete task");
+    }
+  }
+
+  const contactNameById = useMemo(() => {
+    const m = new Map();
+    contacts.forEach((c) => m.set(c.id, c.name));
+    return m;
+  }, [contacts]);
+
+  const dealTitleById = useMemo(() => {
+    const m = new Map();
+    deals.forEach((d) => m.set(d.id, d.title));
+    return m;
+  }, [deals]);
+
+  const filtered = useMemo(() => {
+    const s = search.trim().toLowerCase();
+    return rows
+      .filter((r) => (filter === "all" ? true : r.status === filter))
+      .filter((r) => {
+        if (!s) return true;
+        const contactName = contactNameById.get(r.contact_id) || "";
+        const dealTitle = dealTitleById.get(r.deal_id) || "";
+        return (
+          (r.title || "").toLowerCase().includes(s) ||
+          contactName.toLowerCase().includes(s) ||
+          dealTitle.toLowerCase().includes(s)
+        );
+      });
+  }, [rows, filter, search, contactNameById, dealTitleById]);
+
   return (
-    <div>
-      <div style={styles.header}>
+    <div style={styles.page}>
+      <div style={styles.headerRow}>
         <div>
           <h1 style={styles.h1}>Tasks</h1>
-          <div style={styles.sub}>
-            Realtime: <span style={styles.badge}>{rtStatus}</span>
-          </div>
+          <div style={styles.sub}>Reminders & to-dos tied to contacts and deals.</div>
         </div>
 
-        <div style={styles.headerRight}>
-          <div style={styles.pills}>
-            <button onClick={() => setFilter("open")} style={{ ...styles.pill, ...(filter === "open" ? styles.pillOn : {}) }}>
-              Open
-            </button>
-            <button onClick={() => setFilter("completed")} style={{ ...styles.pill, ...(filter === "completed" ? styles.pillOn : {}) }}>
-              Completed
-            </button>
-            <button onClick={() => setFilter("all")} style={{ ...styles.pill, ...(filter === "all" ? styles.pillOn : {}) }}>
-              All
-            </button>
-          </div>
-
-          <button onClick={loadAll} disabled={loading} style={styles.btnGhost}>
-            {loading ? "Refreshing..." : "Refresh"}
+        <div style={styles.headerBtns}>
+          <button onClick={loadAll} style={styles.btn}>
+            Refresh
           </button>
+          <Link href="/dashboard/calendar" style={styles.btnGhost}>
+            Calendar
+          </Link>
         </div>
       </div>
 
-      {err ? <div style={styles.alert}>{err}</div> : null}
+      <div style={styles.grid}>
+        <div style={styles.card}>
+          <div style={styles.cardTitle}>Add task</div>
 
-      <div style={styles.card}>
-        <h2 style={styles.h2}>Add Task</h2>
+          <form onSubmit={addTask} style={styles.form}>
+            <input
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              style={styles.input}
+              placeholder="Task title (call client, send docs, follow up...)"
+            />
 
-        <form onSubmit={addTask} style={styles.form}>
-          <div style={styles.grid2}>
+            <div style={styles.row2}>
+              <input
+                value={dueAt}
+                onChange={(e) => setDueAt(e.target.value)}
+                style={styles.input}
+                type="datetime-local"
+              />
+              <select
+                value={contactId}
+                onChange={(e) => setContactId(e.target.value)}
+                style={styles.select}
+              >
+                <option value="">Link to Contact (optional)</option>
+                {contacts.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
             <select
-              value={form.contact_id}
-              onChange={(e) => setForm((p) => ({ ...p, contact_id: e.target.value }))}
+              value={dealId}
+              onChange={(e) => setDealId(e.target.value)}
               style={styles.select}
             >
-              {contacts.length === 0 ? (
-                <option value="">No contacts found</option>
-              ) : (
-                contacts.map((c) => {
-                  const name = `${c.first_name || ""} ${c.last_name || ""}`.trim() || "Unnamed";
-                  return (
-                    <option key={c.id} value={c.id}>
-                      {name}
-                    </option>
-                  );
-                })
-              )}
-            </select>
-
-            <select
-              value={form.deal_id}
-              onChange={(e) => setForm((p) => ({ ...p, deal_id: e.target.value }))}
-              style={styles.select}
-              disabled={deals.length === 0}
-            >
-              <option value="">No deal (optional)</option>
+              <option value="">Link to Deal (optional)</option>
               {deals.map((d) => (
                 <option key={d.id} value={d.id}>
                   {d.title}
                 </option>
               ))}
             </select>
-          </div>
 
-          <input
-            value={form.title}
-            onChange={(e) => setForm((p) => ({ ...p, title: e.target.value }))}
-            placeholder="Task title (ex: Follow up with buyer)"
-            style={styles.input}
-          />
-
-          <textarea
-            value={form.description}
-            onChange={(e) => setForm((p) => ({ ...p, description: e.target.value }))}
-            placeholder="Description (optional)"
-            style={styles.textarea}
-            rows={3}
-          />
-
-          <div style={styles.grid2}>
-            <input
-              type="datetime-local"
-              value={form.due_at}
-              onChange={(e) => setForm((p) => ({ ...p, due_at: e.target.value }))}
-              style={styles.input}
-            />
-            <button type="submit" style={styles.btnPrimary} disabled={contacts.length === 0}>
+            <button style={styles.primary} type="submit">
               Add Task
             </button>
+          </form>
+        </div>
+
+        <div style={styles.card}>
+          <div style={styles.controls}>
+            <div style={styles.tabs}>
+              {["open", "done", "all"].map((t) => (
+                <button
+                  key={t}
+                  onClick={() => setFilter(t)}
+                  style={{
+                    ...styles.tab,
+                    ...(filter === t ? styles.tabActive : {}),
+                  }}
+                  type="button"
+                >
+                  {t.toUpperCase()}
+                </button>
+              ))}
+            </div>
+
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              style={styles.search}
+              placeholder="Search tasks..."
+            />
           </div>
 
-          {contacts.length === 0 ? (
-            <div style={{ marginTop: 6, opacity: 0.75, fontSize: 12 }}>
-              Add a contact first in{" "}
-              <Link href="/dashboard/contacts" style={{ color: "white", fontWeight: 900 }}>
-                Contacts
-              </Link>
-              .
-            </div>
-          ) : null}
-        </form>
-      </div>
+          <div style={styles.list}>
+            {loading ? (
+              <div style={styles.muted}>Loading…</div>
+            ) : filtered.length === 0 ? (
+              <div style={styles.muted}>No tasks found.</div>
+            ) : (
+              filtered.map((t) => {
+                const contactName = contactNameById.get(t.contact_id);
+                const dealTitle = dealTitleById.get(t.deal_id);
+                const due = t.due_at ? new Date(t.due_at).toLocaleString() : "";
 
-      <div style={{ marginTop: 18 }}>
-        <h2 style={styles.h2}>
-          Tasks {loading ? "(loading…)" : `(${tasks.length})`}
-        </h2>
-
-        {loading ? (
-          <div style={{ opacity: 0.75 }}>Loading…</div>
-        ) : tasks.length === 0 ? (
-          <div style={{ opacity: 0.75 }}>No tasks yet.</div>
-        ) : (
-          <div style={{ display: "grid", gap: 10, marginTop: 10 }}>
-            {tasks.map((t) => {
-              const c = t.contacts;
-              const d = t.deals;
-
-              const contactName = c
-                ? `${c.first_name || ""} ${c.last_name || ""}`.trim() || "Unnamed"
-                : "No contact";
-
-              const dueText = t.due_at ? new Date(t.due_at).toLocaleString() : "No due date";
-              const badge = getDueBadge(t.due_at, t.completed);
-
-              return (
-                <div key={t.id} style={styles.item}>
-                  <div style={styles.itemTop}>
-                    <div style={{ display: "grid", gap: 4, minWidth: 0 }}>
-                      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                        <div style={{ fontWeight: 950, textDecoration: t.completed ? "line-through" : "none" }}>
-                          {t.title}
-                        </div>
-                        <span
+                return (
+                  <div key={t.id} style={styles.item}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={styles.itemTop}>
+                        <button
+                          type="button"
+                          onClick={() => toggleDone(t)}
                           style={{
-                            ...styles.duePill,
-                            ...(badge.tone === "danger" ? styles.dueDanger : {}),
-                            ...(badge.tone === "warn" ? styles.dueWarn : {}),
+                            ...styles.pill,
+                            ...(t.status === "done" ? styles.pillDone : styles.pillOpen),
                           }}
                         >
-                          {badge.text}
-                        </span>
+                          {t.status === "done" ? "Done" : "Open"}
+                        </button>
+                        <div style={styles.title}>{t.title}</div>
                       </div>
 
                       <div style={styles.meta}>
-                        Contact:{" "}
-                        {t.contact_id ? (
-                          <Link href={`/dashboard/contacts/${t.contact_id}`} style={styles.link}>
-                            {contactName}
-                          </Link>
-                        ) : (
-                          <span>{contactName}</span>
-                        )}
-                        {d?.title ? (
-                          <>
-                            {" "}
-                            • Deal: <b>{d.title}</b>
-                          </>
-                        ) : null}
-                        {" "}
-                        • Due: <b>{dueText}</b>
+                        {due ? <span>Due: {due}</span> : <span style={styles.dim}>No due date</span>}
+                        {contactName ? <span>• Contact: {contactName}</span> : null}
+                        {dealTitle ? <span>• Deal: {dealTitle}</span> : null}
                       </div>
-
-                      {t.description ? <div style={{ opacity: 0.8, fontSize: 13 }}>{t.description}</div> : null}
                     </div>
 
-                    <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-                      <button
-                        onClick={() => toggleComplete(t.id, !t.completed)}
-                        style={t.completed ? styles.btnGhost : styles.btnPrimarySmall}
-                      >
-                        {t.completed ? "Reopen" : "Complete"}
-                      </button>
-                      <button onClick={() => deleteTask(t.id)} style={styles.btnDanger}>
-                        Delete
-                      </button>
-                    </div>
+                    <button type="button" onClick={() => removeTask(t.id)} style={styles.trash}>
+                      Delete
+                    </button>
                   </div>
-                </div>
-              );
-            })}
+                );
+              })
+            )}
           </div>
-        )}
+        </div>
       </div>
     </div>
   );
 }
 
 const styles = {
-  header: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 },
-  headerRight: { display: "flex", gap: 10, alignItems: "center" },
-  h1: { margin: 0, fontSize: 28, fontWeight: 950 },
-  sub: { marginTop: 6, opacity: 0.75 },
-  badge: {
-    display: "inline-block",
-    padding: "2px 10px",
-    borderRadius: 999,
+  page: { color: "white" },
+  headerRow: {
+    display: "flex",
+    alignItems: "flex-end",
+    justifyContent: "space-between",
+    gap: 12,
+    marginBottom: 14,
+  },
+  h1: { margin: 0, fontSize: 34, letterSpacing: -0.6 },
+  sub: { opacity: 0.7, fontWeight: 800, marginTop: 6 },
+
+  headerBtns: { display: "flex", gap: 10, flexWrap: "wrap" },
+  btn: {
+    padding: "10px 14px",
+    borderRadius: 12,
     border: "1px solid rgba(255,255,255,0.16)",
     background: "rgba(255,255,255,0.06)",
-    fontWeight: 900,
-    fontSize: 12,
-  },
-  pills: { display: "flex", gap: 8, alignItems: "center" },
-  pill: {
-    padding: "8px 12px",
-    borderRadius: 999,
-    border: "1px solid rgba(255,255,255,0.16)",
-    background: "rgba(255,255,255,0.04)",
     color: "white",
+    fontWeight: 900,
     cursor: "pointer",
-    fontWeight: 900,
-    fontSize: 13,
-    opacity: 0.85,
   },
-  pillOn: { background: "rgba(255,255,255,0.10)", opacity: 1 },
-
-  h2: { margin: 0, fontSize: 18, fontWeight: 900 },
-  card: {
-    marginTop: 18,
-    padding: 16,
-    border: "1px solid #242424",
-    borderRadius: 16,
-    background: "#111111",
-  },
-  form: { marginTop: 12, display: "grid", gap: 10 },
-  grid2: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 },
-  input: {
-    padding: 12,
-    borderRadius: 12,
-    border: "1px solid #2a2a2a",
-    background: "#0f0f0f",
-    color: "white",
-    outline: "none",
-  },
-  select: {
-    padding: 12,
-    borderRadius: 12,
-    border: "1px solid #2a2a2a",
-    background: "#0f0f0f",
-    color: "white",
-    outline: "none",
-  },
-  textarea: {
-    padding: 12,
-    borderRadius: 12,
-    border: "1px solid #2a2a2a",
-    background: "#0f0f0f",
-    color: "white",
-    outline: "none",
-    resize: "vertical",
-  },
-
   btnGhost: {
     padding: "10px 14px",
-    borderRadius: 999,
+    borderRadius: 12,
     border: "1px solid rgba(255,255,255,0.16)",
-    background: "rgba(255,255,255,0.06)",
+    background: "transparent",
     color: "white",
-    cursor: "pointer",
     fontWeight: 900,
-    fontSize: 13,
+    cursor: "pointer",
+    textDecoration: "none",
+    display: "inline-flex",
+    alignItems: "center",
   },
-  btnPrimary: {
+
+  grid: { display: "grid", gridTemplateColumns: "1fr 1.6fr", gap: 14 },
+  card: {
+    borderRadius: 18,
+    border: "1px solid rgba(255,255,255,0.12)",
+    background: "rgba(255,255,255,0.04)",
+    padding: 14,
+  },
+  cardTitle: { fontWeight: 950, marginBottom: 10 },
+
+  form: { display: "grid", gap: 10 },
+  row2: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 },
+
+  input: {
+    padding: "12px 12px",
+    borderRadius: 12,
+    border: "1px solid rgba(255,255,255,0.16)",
+    background: "rgba(0,0,0,0.25)",
+    color: "white",
+    outline: "none",
+    fontWeight: 800,
+  },
+  select: {
+    padding: "12px 12px",
+    borderRadius: 12,
+    border: "1px solid rgba(255,255,255,0.16)",
+    background: "rgba(0,0,0,0.25)",
+    color: "white",
+    outline: "none",
+    fontWeight: 800,
+  },
+  primary: {
     padding: "12px 14px",
     borderRadius: 12,
-    border: "1px solid #f5f5f5",
-    background: "#f5f5f5",
-    color: "#0b0b0b",
+    border: "1px solid rgba(255,255,255,0.16)",
+    background: "white",
+    color: "black",
     fontWeight: 950,
     cursor: "pointer",
-    width: "fit-content",
   },
-  btnPrimarySmall: {
-    padding: "10px 12px",
+
+  controls: { display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" },
+  tabs: { display: "flex", gap: 8 },
+  tab: {
+    padding: "8px 10px",
     borderRadius: 999,
-    border: "1px solid #f5f5f5",
-    background: "#f5f5f5",
-    color: "#0b0b0b",
+    border: "1px solid rgba(255,255,255,0.14)",
+    background: "rgba(255,255,255,0.06)",
+    color: "white",
     fontWeight: 950,
     cursor: "pointer",
-    fontSize: 13,
+    fontSize: 12,
   },
-  btnDanger: {
+  tabActive: {
+    background: "rgba(255,255,255,0.14)",
+    border: "1px solid rgba(255,255,255,0.22)",
+  },
+  search: {
+    marginLeft: "auto",
+    minWidth: 240,
     padding: "10px 12px",
     borderRadius: 999,
+    border: "1px solid rgba(255,255,255,0.16)",
+    background: "rgba(0,0,0,0.25)",
+    color: "white",
+    outline: "none",
+    fontWeight: 850,
+  },
+
+  list: { marginTop: 12, display: "grid", gap: 10 },
+  muted: { opacity: 0.7, fontWeight: 800, padding: 10 },
+
+  item: {
+    display: "flex",
+    justifyContent: "space-between",
+    gap: 12,
+    padding: 12,
+    borderRadius: 14,
+    border: "1px solid rgba(255,255,255,0.12)",
+    background: "rgba(0,0,0,0.25)",
+  },
+  itemTop: { display: "flex", alignItems: "center", gap: 10 },
+  title: { fontWeight: 950, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+  meta: { marginTop: 6, fontSize: 12, opacity: 0.75, display: "flex", gap: 8, flexWrap: "wrap" },
+  dim: { opacity: 0.65 },
+
+  pill: {
+    borderRadius: 999,
+    padding: "6px 10px",
+    fontWeight: 950,
+    fontSize: 12,
+    border: "1px solid rgba(255,255,255,0.16)",
+    cursor: "pointer",
+  },
+  pillOpen: { background: "rgba(255,255,255,0.08)", color: "white" },
+  pillDone: { background: "rgba(34,197,94,0.18)", color: "white", border: "1px solid rgba(34,197,94,0.35)" },
+
+  trash: {
+    borderRadius: 12,
+    padding: "10px 12px",
     border: "1px solid rgba(239,68,68,0.35)",
     background: "rgba(239,68,68,0.10)",
     color: "#fecaca",
+    fontWeight: 950,
     cursor: "pointer",
-    fontWeight: 950,
-    fontSize: 13,
-    height: "fit-content",
-  },
-
-  item: {
-    padding: 14,
-    borderRadius: 16,
-    border: "1px solid #242424",
-    background: "#111111",
-  },
-  itemTop: { display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" },
-  meta: { opacity: 0.75, fontSize: 13, lineHeight: 1.4 },
-  link: { color: "white", fontWeight: 950, textDecoration: "underline" },
-
-  duePill: {
-    padding: "3px 10px",
-    borderRadius: 999,
-    border: "1px solid rgba(255,255,255,0.16)",
-    background: "rgba(255,255,255,0.06)",
-    fontSize: 12,
-    fontWeight: 950,
-    opacity: 0.9,
-  },
-  dueDanger: {
-    border: "1px solid rgba(239,68,68,0.35)",
-    background: "rgba(239,68,68,0.12)",
-    color: "#fecaca",
-    opacity: 1,
-  },
-  dueWarn: {
-    border: "1px solid rgba(245,158,11,0.35)",
-    background: "rgba(245,158,11,0.10)",
-    color: "#fde68a",
-    opacity: 1,
-  },
-
-  alert: {
-    marginTop: 14,
-    padding: 12,
-    borderRadius: 12,
-    background: "#1a0f0f",
-    border: "1px solid #5a1f1f",
-    color: "#ffd6d6",
-    fontWeight: 900,
+    flexShrink: 0,
   },
 };
