@@ -58,6 +58,11 @@ export default function TasksPage() {
     return new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
   }
 
+  function endOfNext7Local() {
+    const start = startOfTodayLocal();
+    return new Date(start.getTime() + 7 * 24 * 60 * 60 * 1000);
+  }
+
   function isOverdue(dueAtIso, completed) {
     if (completed) return false;
     if (!dueAtIso) return false;
@@ -75,13 +80,14 @@ export default function TasksPage() {
     return due.getTime() >= start && due.getTime() <= end;
   }
 
-  function isWithinNext7Days(dueAtIso) {
+  function isWithinNext7Days(dueAtIso, completed) {
+    if (completed) return false;
     if (!dueAtIso) return false;
     const due = new Date(dueAtIso);
     if (Number.isNaN(due.getTime())) return false;
-    const now = new Date().getTime();
-    const seven = now + 7 * 24 * 60 * 60 * 1000;
-    return due.getTime() >= now && due.getTime() <= seven;
+    const start = new Date().getTime();
+    const end = endOfNext7Local().getTime();
+    return due.getTime() >= start && due.getTime() <= end;
   }
 
   function contactNameById(id) {
@@ -93,6 +99,17 @@ export default function TasksPage() {
   function dealTitleById(id) {
     const d = deals.find((x) => x.id === id);
     return d?.title || "—";
+  }
+
+  function sortByDueThenCreated(list) {
+    const next = [...list];
+    next.sort((a, b) => {
+      const ad = a.due_at ? new Date(a.due_at).getTime() : Number.POSITIVE_INFINITY;
+      const bd = b.due_at ? new Date(b.due_at).getTime() : Number.POSITIVE_INFINITY;
+      if (ad !== bd) return ad - bd;
+      return String(b.created_at || "").localeCompare(String(a.created_at || ""));
+    });
+    return next;
   }
 
   async function loadContacts() {
@@ -128,14 +145,8 @@ export default function TasksPage() {
     setLoading(true);
 
     try {
-      // Pull all tasks for this user; filters happen client-side for simplicity
-      const { data, error } = await sb
-        .from("tasks")
-        .select("*")
-        .order("created_at", { ascending: false });
-
+      const { data, error } = await sb.from("tasks").select("*").order("created_at", { ascending: false });
       if (error) throw error;
-
       setTasks(Array.isArray(data) ? data : []);
     } catch (e) {
       console.error(e);
@@ -214,7 +225,6 @@ export default function TasksPage() {
         .single();
 
       if (error) throw error;
-
       setTasks((prev) => prev.map((x) => (x.id === t.id ? data : x)));
     } catch (e) {
       console.error(e);
@@ -241,18 +251,27 @@ export default function TasksPage() {
     }
   }
 
-  // Keep deal dropdown relevant when contact changes
+  // Keep deal filter valid when contact filter changes
   useEffect(() => {
-    if (!form.contact_id) return;
-    // If the selected deal doesn't belong to selected contact, clear it
-    if (form.deal_id) {
-      const d = deals.find((x) => x.id === form.deal_id);
-      if (d && d.contact_id !== form.contact_id) {
-        setForm((p) => ({ ...p, deal_id: "" }));
-      }
+    if (filterDealId === "all") return;
+    if (filterContactId === "all") return;
+
+    const d = deals.find((x) => x.id === filterDealId);
+    if (d && d.contact_id !== filterContactId) {
+      setFilterDealId("all");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [form.contact_id]);
+  }, [filterContactId, deals]);
+
+  // Keep "Add Task" deal dropdown valid when form contact changes
+  useEffect(() => {
+    if (!form.contact_id) return;
+    if (form.deal_id) {
+      const d = deals.find((x) => x.id === form.deal_id);
+      if (d && d.contact_id !== form.contact_id) setForm((p) => ({ ...p, deal_id: "" }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.contact_id, deals]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -295,19 +314,101 @@ export default function TasksPage() {
       // Due
       if (filterDue === "today" && !isToday(t.due_at)) return false;
       if (filterDue === "overdue" && !isOverdue(t.due_at, t.completed)) return false;
-      if (filterDue === "next7" && !isWithinNext7Days(t.due_at)) return false;
+      if (filterDue === "next7" && !isWithinNext7Days(t.due_at, t.completed)) return false;
 
       return true;
     })
     .sort((a, b) => {
-      // Sort by due date first (soonest first), then created_at
       const ad = a.due_at ? new Date(a.due_at).getTime() : Number.POSITIVE_INFINITY;
       const bd = b.due_at ? new Date(b.due_at).getTime() : Number.POSITIVE_INFINITY;
       if (ad !== bd) return ad - bd;
       return String(b.created_at || "").localeCompare(String(a.created_at || ""));
     });
 
+  // Buckets (feel like a real CRM)
+  const overdue = sortByDueThenCreated(filteredTasks.filter((t) => isOverdue(t.due_at, t.completed)));
+  const dueToday = sortByDueThenCreated(filteredTasks.filter((t) => !t.completed && isToday(t.due_at)));
+  const next7 = sortByDueThenCreated(filteredTasks.filter((t) => isWithinNext7Days(t.due_at, t.completed) && !isToday(t.due_at)));
+  const noDue = sortByDueThenCreated(filteredTasks.filter((t) => !t.completed && !t.due_at));
+  const completed = sortByDueThenCreated(filteredTasks.filter((t) => t.completed));
+
   const canCreate = contacts.length > 0;
+
+  function TaskRow({ t }) {
+    const overdueFlag = isOverdue(t.due_at, t.completed);
+    const todayFlag = !overdueFlag && isToday(t.due_at);
+
+    return (
+      <div key={t.id} style={styles.item}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+          <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+            <button
+              onClick={() => toggleTask(t)}
+              style={t.completed ? styles.chkOn : styles.chkOff}
+              title={t.completed ? "Mark as open" : "Mark as done"}
+              type="button"
+            />
+            <div style={{ display: "grid", gap: 6, minWidth: 0 }}>
+              <div
+                style={{
+                  fontWeight: 950,
+                  opacity: t.completed ? 0.55 : 1,
+                  textDecoration: t.completed ? "line-through" : "none",
+                }}
+              >
+                {t.title}
+              </div>
+
+              {t.description ? (
+                <div style={{ opacity: 0.85, whiteSpace: "pre-wrap", lineHeight: 1.45 }}>{t.description}</div>
+              ) : null}
+
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 10, fontSize: 13, opacity: 0.95 }}>
+                <div>
+                  <span style={{ opacity: 0.75 }}>Contact:</span>{" "}
+                  {t.contact_id ? (
+                    <Link href={`/dashboard/contacts/${t.contact_id}`} style={styles.link}>
+                      {contactNameById(t.contact_id)}
+                    </Link>
+                  ) : (
+                    <span>—</span>
+                  )}
+                </div>
+
+                <div>
+                  <span style={{ opacity: 0.75 }}>Deal:</span>{" "}
+                  <span style={{ fontWeight: 900 }}>{t.deal_id ? dealTitleById(t.deal_id) : "—"}</span>
+                </div>
+
+                <div>
+                  <span style={{ opacity: 0.75 }}>Due:</span>{" "}
+                  <span style={{ fontWeight: 900 }}>{t.due_at ? new Date(t.due_at).toLocaleString() : "—"}</span>
+                  {overdueFlag ? <span style={styles.badgeRed}> Overdue</span> : null}
+                  {todayFlag ? <span style={styles.badgeBlue}> Today</span> : null}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <button onClick={() => deleteTask(t.id)} style={styles.btnDanger} type="button">
+            Delete
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  function Bucket({ title, count, children }) {
+    return (
+      <div style={styles.bucket}>
+        <div style={styles.bucketHeader}>
+          <div style={{ fontWeight: 950 }}>{title}</div>
+          <div style={{ opacity: 0.75, fontSize: 13 }}>{count}</div>
+        </div>
+        <div style={{ marginTop: 10, display: "grid", gap: 10 }}>{children}</div>
+      </div>
+    );
+  }
 
   return (
     <div>
@@ -413,7 +514,7 @@ export default function TasksPage() {
       <div style={styles.card}>
         <div style={styles.cardHeader}>
           <h2 style={styles.h2}>
-            List {loading ? "(loading...)" : `(${filteredTasks.length})`}
+            View {loading ? "(loading...)" : `(${filteredTasks.length})`}
           </h2>
         </div>
 
@@ -440,12 +541,7 @@ export default function TasksPage() {
             ))}
           </select>
 
-          <select
-            value={filterDealId}
-            onChange={(e) => setFilterDealId(e.target.value)}
-            style={styles.selectSmall}
-            disabled={filterContactId === "all" ? false : false}
-          >
+          <select value={filterDealId} onChange={(e) => setFilterDealId(e.target.value)} style={styles.selectSmall}>
             <option value="all">All deals</option>
             {deals
               .filter((d) => (filterContactId === "all" ? true : d.contact_id === filterContactId))
@@ -458,81 +554,58 @@ export default function TasksPage() {
         </div>
       </div>
 
-      {/* Tasks */}
-      <div style={{ marginTop: 12 }}>
+      {/* Buckets */}
+      <div style={{ marginTop: 14 }}>
         {loading ? (
           <div style={{ opacity: 0.75 }}>Loading…</div>
         ) : filteredTasks.length === 0 ? (
           <div style={{ opacity: 0.75 }}>No tasks match your filters.</div>
         ) : (
-          <div style={{ display: "grid", gap: 10 }}>
-            {filteredTasks.map((t) => {
-              const overdue = isOverdue(t.due_at, t.completed);
-              const dueToday = isToday(t.due_at);
+          <div style={{ display: "grid", gap: 14 }}>
+            {overdue.length > 0 ? (
+              <Bucket title="Overdue" count={overdue.length}>
+                {overdue.map((t) => (
+                  <TaskRow key={t.id} t={t} />
+                ))}
+              </Bucket>
+            ) : null}
 
-              return (
-                <div key={t.id} style={styles.item}>
-                  <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
-                    <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
-                      <button
-                        onClick={() => toggleTask(t)}
-                        style={t.completed ? styles.chkOn : styles.chkOff}
-                        title={t.completed ? "Mark as open" : "Mark as done"}
-                        type="button"
-                      />
-                      <div style={{ display: "grid", gap: 6, minWidth: 0 }}>
-                        <div
-                          style={{
-                            fontWeight: 950,
-                            opacity: t.completed ? 0.55 : 1,
-                            textDecoration: t.completed ? "line-through" : "none",
-                          }}
-                        >
-                          {t.title}
-                        </div>
+            {dueToday.length > 0 ? (
+              <Bucket title="Due Today" count={dueToday.length}>
+                {dueToday.map((t) => (
+                  <TaskRow key={t.id} t={t} />
+                ))}
+              </Bucket>
+            ) : null}
 
-                        {t.description ? (
-                          <div style={{ opacity: 0.85, whiteSpace: "pre-wrap", lineHeight: 1.45 }}>
-                            {t.description}
-                          </div>
-                        ) : null}
+            {next7.length > 0 ? (
+              <Bucket title="Next 7 Days" count={next7.length}>
+                {next7.map((t) => (
+                  <TaskRow key={t.id} t={t} />
+                ))}
+              </Bucket>
+            ) : null}
 
-                        <div style={{ display: "flex", flexWrap: "wrap", gap: 10, fontSize: 13, opacity: 0.95 }}>
-                          <div>
-                            <span style={{ opacity: 0.75 }}>Contact:</span>{" "}
-                            {t.contact_id ? (
-                              <Link href={`/dashboard/contacts/${t.contact_id}`} style={styles.link}>
-                                {contactNameById(t.contact_id)}
-                              </Link>
-                            ) : (
-                              <span>—</span>
-                            )}
-                          </div>
+            {noDue.length > 0 ? (
+              <Bucket title="No Due Date" count={noDue.length}>
+                {noDue.map((t) => (
+                  <TaskRow key={t.id} t={t} />
+                ))}
+              </Bucket>
+            ) : null}
 
-                          <div>
-                            <span style={{ opacity: 0.75 }}>Deal:</span>{" "}
-                            <span style={{ fontWeight: 900 }}>{t.deal_id ? dealTitleById(t.deal_id) : "—"}</span>
-                          </div>
+            {filterStatus !== "open" && completed.length > 0 ? (
+              <Bucket title="Completed" count={completed.length}>
+                {completed.map((t) => (
+                  <TaskRow key={t.id} t={t} />
+                ))}
+              </Bucket>
+            ) : null}
 
-                          <div>
-                            <span style={{ opacity: 0.75 }}>Due:</span>{" "}
-                            <span style={{ fontWeight: 900 }}>
-                              {t.due_at ? new Date(t.due_at).toLocaleString() : "—"}
-                            </span>
-                            {overdue ? <span style={styles.badgeRed}> Overdue</span> : null}
-                            {dueToday && !overdue ? <span style={styles.badgeBlue}> Today</span> : null}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-
-                    <button onClick={() => deleteTask(t.id)} style={styles.btnDanger} type="button">
-                      Delete
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
+            {/* If open-only and none hit the buckets */}
+            {filterStatus === "open" && overdue.length === 0 && dueToday.length === 0 && next7.length === 0 && noDue.length === 0 ? (
+              <div style={{ opacity: 0.75 }}>No open tasks match your filters.</div>
+            ) : null}
           </div>
         )}
       </div>
@@ -591,20 +664,9 @@ const styles = {
     background: "#111111",
   },
 
-  cardHeader: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    gap: 10,
-  },
+  cardHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 },
 
-  filters: {
-    marginTop: 12,
-    display: "flex",
-    gap: 10,
-    flexWrap: "wrap",
-    alignItems: "center",
-  },
+  filters: { marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" },
 
   form: { marginTop: 12, display: "grid", gap: 10 },
   grid2: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 },
@@ -680,6 +742,22 @@ const styles = {
     cursor: "pointer",
     fontWeight: 950,
     height: "fit-content",
+  },
+
+  bucket: {
+    padding: 16,
+    borderRadius: 16,
+    border: "1px solid #242424",
+    background: "#111111",
+  },
+
+  bucketHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 12,
+    paddingBottom: 10,
+    borderBottom: "1px solid #242424",
   },
 
   item: {
