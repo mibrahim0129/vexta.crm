@@ -9,7 +9,7 @@ export const metadata = {
 
 function CheckIcon() {
   return (
-    <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" aria-hidden="true">
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" aria-hidden="true">
       <path
         d="M20 6L9 17l-5-5"
         stroke="currentColor"
@@ -23,176 +23,135 @@ function CheckIcon() {
 
 export default function HomePage() {
   return (
-    <main className="min-h-screen bg-zinc-950 text-white">
-      {/* Background */}
-      <div className="pointer-events-none fixed inset-0 -z-10">
-        <div className="absolute inset-0 bg-[radial-gradient(1100px_circle_at_20%_10%,rgba(255,255,255,0.10),transparent_60%)]" />
-        <div className="absolute inset-0 bg-[radial-gradient(900px_circle_at_80%_30%,rgba(255,255,255,0.08),transparent_55%)]" />
-        <div className="absolute inset-0 bg-gradient-to-b from-zinc-950 via-zinc-950 to-black" />
-      </div>
+    <main className="page">
+      <div className="bg" />
 
-      {/* Header */}
-      <header className="sticky top-0 z-20 border-b border-white/10 bg-zinc-950/70 backdrop-blur">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-4">
-          <Link href="/" className="flex items-center gap-2">
-            <div className="h-9 w-9 rounded-xl bg-white" />
-            <span className="text-lg font-semibold tracking-tight">Vexta</span>
+      <header className="header">
+        <div className="wrap headerInner">
+          <Link href="/" className="brand">
+            <span className="logo" />
+            <span className="brandName">Vexta</span>
           </Link>
 
-          <nav className="hidden items-center gap-6 md:flex">
-            <a href="#features" className="text-sm text-white/70 hover:text-white">
-              Features
-            </a>
-            <a href="#pricing" className="text-sm text-white/70 hover:text-white">
-              Pricing
-            </a>
-            <a href="#about" className="text-sm text-white/70 hover:text-white">
-              About
-            </a>
+          <nav className="nav">
+            <a href="#features">Features</a>
+            <a href="#pricing">Pricing</a>
+            <a href="#about">About</a>
           </nav>
 
-          <div className="flex items-center gap-2">
-            <Link
-              href="/login"
-              className="rounded-xl border border-white/15 px-4 py-2 text-sm font-semibold text-white/90 hover:bg-white/5"
-            >
+          <div className="headerActions">
+            <Link href="/login" className="btn btnGhost">
               Log in
             </Link>
-            <Link
-              href="/signup"
-              className="rounded-xl bg-white px-4 py-2 text-sm font-semibold text-zinc-950 hover:bg-zinc-100"
-            >
+            <Link href="/signup" className="btn btnPrimary">
               Get started
             </Link>
           </div>
         </div>
       </header>
 
-      {/* Hero */}
-      <section className="mx-auto max-w-6xl px-4 py-14 md:py-20">
-        <div className="grid gap-10 md:grid-cols-2 md:items-center">
-          <div>
-            <p className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/5 px-3 py-1 text-xs font-semibold text-white/80">
-              Built for real estate workflows
-              <span className="h-1 w-1 rounded-full bg-white/40" />
-              Fast. Clean. Linked.
-            </p>
-
-            <h1 className="mt-5 text-4xl font-semibold tracking-tight md:text-5xl">
-              Your CRM that actually{" "}
-              <span className="text-white/70">keeps you moving</span>.
-            </h1>
-
-            <p className="mt-4 max-w-xl text-base leading-relaxed text-white/70 md:text-lg">
-              Vexta CRM keeps contacts, deals, tasks, notes, and calendar events
-              connected — so you always know the next follow-up and what matters
-              today.
-            </p>
-
-            <div className="mt-7 flex flex-col gap-3 sm:flex-row">
-              <Link
-                href="/signup"
-                className="inline-flex items-center justify-center rounded-xl bg-white px-5 py-3 text-sm font-semibold text-zinc-950 hover:bg-zinc-100"
-              >
-                Create account
-              </Link>
-              <Link
-                href="/login"
-                className="inline-flex items-center justify-center rounded-xl border border-white/15 bg-white/5 px-5 py-3 text-sm font-semibold text-white hover:bg-white/10"
-              >
-                Log in
-              </Link>
-            </div>
-
-            <div className="mt-7 grid gap-2 text-sm text-white/70">
-              <div className="flex items-center gap-2">
-                <span className="text-white">
-                  <CheckIcon />
-                </span>
-                Contact profiles that act like a hub (deals/notes/tasks/events).
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-white">
-                  <CheckIcon />
-                </span>
-                Deal pages with task buckets + event visibility.
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-white">
-                  <CheckIcon />
-                </span>
-                Fast filters designed for daily execution.
-              </div>
-            </div>
+      <section className="wrap hero">
+        <div className="heroLeft">
+          <div className="pill">
+            Built for real estate workflows <span className="dot" /> Fast. Clean. Linked.
           </div>
 
-          {/* Right-side mock */}
-          <div className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-[0_20px_80px_rgba(0,0,0,0.50)]">
-            <div className="flex items-center justify-between">
+          <h1 className="h1">
+            Your CRM that actually <span className="muted">keeps you moving</span>.
+          </h1>
+
+          <p className="p">
+            Vexta CRM keeps contacts, deals, tasks, notes, and calendar events connected —
+            so you always know the next follow-up and what matters today.
+          </p>
+
+          <div className="cta">
+            <Link href="/signup" className="btn btnPrimary btnLg">
+              Create account
+            </Link>
+            <Link href="/login" className="btn btnGhost btnLg">
+              Log in
+            </Link>
+          </div>
+
+          <div className="bullets">
+            <div className="bullet">
+              <span className="check">
+                <CheckIcon />
+              </span>
+              Contact profiles that act like a hub (deals/notes/tasks/events).
+            </div>
+            <div className="bullet">
+              <span className="check">
+                <CheckIcon />
+              </span>
+              Deal pages with task buckets + event visibility.
+            </div>
+            <div className="bullet">
+              <span className="check">
+                <CheckIcon />
+              </span>
+              Fast filters designed for daily execution.
+            </div>
+          </div>
+        </div>
+
+        <div className="heroRight">
+          <div className="panel">
+            <div className="panelTop">
               <div>
-                <div className="text-xs text-white/60">Today</div>
-                <div className="mt-1 text-lg font-semibold">Dashboard snapshot</div>
+                <div className="kicker">Today</div>
+                <div className="panelTitle">Dashboard snapshot</div>
               </div>
-              <div className="rounded-full border border-white/10 bg-black/20 px-3 py-1 text-xs text-white/70">
-                Pipeline • Tasks • Calendar
+              <div className="badge">Pipeline • Tasks • Calendar</div>
+            </div>
+
+            <div className="cards">
+              <div className="card">
+                <div className="kicker">Next follow-up</div>
+                <div className="cardTitle">Call: Buyer pre-approval</div>
+                <div className="cardMeta">Linked to: John D • Deal: Bridgeview Ranch</div>
+              </div>
+
+              <div className="card">
+                <div className="kicker">Deal stage</div>
+                <div className="cardTitle">Under Contract</div>
+                <div className="cardMeta">Tasks bucketed by stage • Events visible at a glance</div>
+              </div>
+
+              <div className="card">
+                <div className="kicker">Upcoming</div>
+                <div className="cardTitle">Inspection — 10:30 AM</div>
+                <div className="cardMeta">Filter calendar by contact / active deal</div>
               </div>
             </div>
 
-            <div className="mt-5 grid gap-3">
-              <div className="rounded-xl border border-white/10 bg-black/20 p-4">
-                <div className="text-xs text-white/60">Next follow-up</div>
-                <div className="mt-1 font-semibold">Call: Buyer pre-approval</div>
-                <div className="mt-2 text-xs text-white/60">
-                  Linked to: John D • Deal: Bridgeview Ranch
-                </div>
+            <div className="miniStats">
+              <div className="mini">
+                <div className="miniTitle">Contacts</div>
+                <div className="miniSub">linked</div>
               </div>
-
-              <div className="rounded-xl border border-white/10 bg-black/20 p-4">
-                <div className="text-xs text-white/60">Deal stage</div>
-                <div className="mt-1 font-semibold">Under Contract</div>
-                <div className="mt-2 text-xs text-white/60">
-                  Tasks bucketed by stage • Events visible at a glance
-                </div>
+              <div className="mini">
+                <div className="miniTitle">Deals</div>
+                <div className="miniSub">tracked</div>
               </div>
-
-              <div className="rounded-xl border border-white/10 bg-black/20 p-4">
-                <div className="text-xs text-white/60">Upcoming</div>
-                <div className="mt-1 font-semibold">Inspection — 10:30 AM</div>
-                <div className="mt-2 text-xs text-white/60">
-                  Filter calendar by contact / active deal
-                </div>
-              </div>
-            </div>
-
-            <div className="mt-5 grid grid-cols-3 gap-3 text-center text-xs text-white/60">
-              <div className="rounded-xl border border-white/10 bg-black/20 p-3">
-                <div className="text-white font-semibold">Contacts</div>
-                <div className="mt-1">linked</div>
-              </div>
-              <div className="rounded-xl border border-white/10 bg-black/20 p-3">
-                <div className="text-white font-semibold">Deals</div>
-                <div className="mt-1">tracked</div>
-              </div>
-              <div className="rounded-xl border border-white/10 bg-black/20 p-3">
-                <div className="text-white font-semibold">Tasks</div>
-                <div className="mt-1">actionable</div>
+              <div className="mini">
+                <div className="miniTitle">Tasks</div>
+                <div className="miniSub">actionable</div>
               </div>
             </div>
           </div>
         </div>
       </section>
 
-      {/* Features */}
-      <section id="features" className="border-t border-white/10 bg-black/10">
-        <div className="mx-auto max-w-6xl px-4 py-16">
-          <h2 className="text-2xl font-semibold tracking-tight md:text-3xl">
-            Features that match your workflow
-          </h2>
-          <p className="mt-2 max-w-2xl text-white/70">
+      <section id="features" className="section sectionAlt">
+        <div className="wrap">
+          <h2 className="h2">Features that match your workflow</h2>
+          <p className="p2">
             Built around speed, linking records, and keeping the next action obvious.
           </p>
 
-          <div className="mt-10 grid gap-4 md:grid-cols-3">
+          <div className="grid3">
             {[
               {
                 title: "Contact Profile Hub",
@@ -219,146 +178,542 @@ export default function HomePage() {
                 desc: "Supabase auth + dashboard protection + Google OAuth.",
               },
             ].map((f) => (
-              <div
-                key={f.title}
-                className="rounded-2xl border border-white/10 bg-white/5 p-5"
-              >
-                <h3 className="text-base font-semibold">{f.title}</h3>
-                <p className="mt-2 text-sm leading-relaxed text-white/70">{f.desc}</p>
+              <div key={f.title} className="feature">
+                <div className="featureTitle">{f.title}</div>
+                <div className="featureDesc">{f.desc}</div>
               </div>
             ))}
           </div>
         </div>
       </section>
 
-      {/* Pricing */}
-      <section id="pricing" className="border-t border-white/10">
-        <div className="mx-auto max-w-6xl px-4 py-16">
-          <h2 className="text-2xl font-semibold tracking-tight md:text-3xl">Pricing</h2>
-          <p className="mt-2 max-w-2xl text-white/70">
-            Simple tiers. Start free, upgrade when you’re ready.
-          </p>
+      <section id="pricing" className="section">
+        <div className="wrap">
+          <h2 className="h2">Pricing</h2>
+          <p className="p2">Simple tiers. Start free, upgrade when you’re ready.</p>
 
-          <div className="mt-10 grid gap-4 md:grid-cols-3">
-            <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
-              <div className="text-sm font-semibold">Starter</div>
-              <div className="mt-2 text-3xl font-semibold">$0</div>
-              <div className="mt-1 text-sm text-white/60">For getting set up</div>
-              <ul className="mt-5 space-y-2 text-sm text-white/70">
-                <li className="flex items-center gap-2">
+          <div className="grid3">
+            <div className="priceCard">
+              <div className="priceTop">
+                <div className="priceName">Starter</div>
+                <div className="price">$0</div>
+                <div className="priceSub">For getting set up</div>
+              </div>
+              <ul className="list">
+                <li>
                   <CheckIcon /> Contacts, deals, notes
                 </li>
-                <li className="flex items-center gap-2">
+                <li>
                   <CheckIcon /> Tasks + calendar basics
                 </li>
-                <li className="flex items-center gap-2">
+                <li>
                   <CheckIcon /> Standard filters
                 </li>
               </ul>
-              <Link
-                href="/signup"
-                className="mt-6 inline-flex w-full items-center justify-center rounded-xl bg-white px-4 py-2 text-sm font-semibold text-zinc-950 hover:bg-zinc-100"
-              >
+              <Link href="/signup" className="btn btnPrimary btnFull">
                 Start free
               </Link>
             </div>
 
-            <div className="rounded-2xl border border-white/10 bg-white p-6 text-zinc-950 shadow-[0_30px_120px_rgba(0,0,0,0.55)]">
-              <div className="text-sm font-semibold">Pro</div>
-              <div className="mt-2 text-3xl font-semibold">$29</div>
-              <div className="mt-1 text-sm text-zinc-600">Per month</div>
-              <ul className="mt-5 space-y-2 text-sm text-zinc-700">
-                <li className="flex items-center gap-2">
+            <div className="priceCard priceFeatured">
+              <div className="priceTop">
+                <div className="priceName">Pro</div>
+                <div className="price">$29</div>
+                <div className="priceSub">Per month</div>
+              </div>
+              <ul className="list">
+                <li>
                   <CheckIcon /> Everything in Starter
                 </li>
-                <li className="flex items-center gap-2">
+                <li>
                   <CheckIcon /> Advanced filters + reporting
                 </li>
-                <li className="flex items-center gap-2">
+                <li>
                   <CheckIcon /> Pipeline views
                 </li>
-                <li className="flex items-center gap-2">
+                <li>
                   <CheckIcon /> Priority improvements
                 </li>
               </ul>
-              <Link
-                href="/signup"
-                className="mt-6 inline-flex w-full items-center justify-center rounded-xl bg-zinc-950 px-4 py-2 text-sm font-semibold text-white hover:bg-zinc-900"
-              >
+              <Link href="/signup" className="btn btnDark btnFull">
                 Get Pro
               </Link>
             </div>
 
-            <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
-              <div className="text-sm font-semibold">Team</div>
-              <div className="mt-2 text-3xl font-semibold">$79</div>
-              <div className="mt-1 text-sm text-white/60">Per month</div>
-              <ul className="mt-5 space-y-2 text-sm text-white/70">
-                <li className="flex items-center gap-2">
+            <div className="priceCard">
+              <div className="priceTop">
+                <div className="priceName">Team</div>
+                <div className="price">$79</div>
+                <div className="priceSub">Per month</div>
+              </div>
+              <ul className="list">
+                <li>
                   <CheckIcon /> Shared pipeline options
                 </li>
-                <li className="flex items-center gap-2">
+                <li>
                   <CheckIcon /> Roles & permissions
                 </li>
-                <li className="flex items-center gap-2">
+                <li>
                   <CheckIcon /> Team reporting
                 </li>
               </ul>
-              <Link
-                href="/signup"
-                className="mt-6 inline-flex w-full items-center justify-center rounded-xl border border-white/15 bg-white/5 px-4 py-2 text-sm font-semibold text-white hover:bg-white/10"
-              >
+              <Link href="/signup" className="btn btnGhost btnFull">
                 Start Team
               </Link>
             </div>
           </div>
 
-          <p className="mt-6 text-xs text-white/50">
+          <p className="finePrint">
             Pricing can be placeholders while you finish the product.
           </p>
         </div>
       </section>
 
-      {/* About */}
-      <section id="about" className="border-t border-white/10 bg-black/10">
-        <div className="mx-auto max-w-6xl px-4 py-16">
-          <h2 className="text-2xl font-semibold tracking-tight md:text-3xl">About Vexta</h2>
-          <p className="mt-2 max-w-3xl text-white/70">
-            Vexta CRM is built to be practical: help agents follow up faster, keep deals clean,
-            and reduce chaos. The goal is simple — more action, less clutter.
+      <section id="about" className="section sectionAlt">
+        <div className="wrap">
+          <h2 className="h2">About Vexta</h2>
+          <p className="p2">
+            Vexta CRM is built to be practical: help agents follow up faster, keep deals
+            clean, and reduce chaos. The goal is simple — more action, less clutter.
           </p>
 
-          <div className="mt-8 flex flex-col gap-3 sm:flex-row">
-            <Link
-              href="/signup"
-              className="inline-flex items-center justify-center rounded-xl bg-white px-5 py-3 text-sm font-semibold text-zinc-950 hover:bg-zinc-100"
-            >
+          <div className="cta">
+            <Link href="/signup" className="btn btnPrimary btnLg">
               Create account
             </Link>
-            <Link
-              href="/login"
-              className="inline-flex items-center justify-center rounded-xl border border-white/15 bg-white/5 px-5 py-3 text-sm font-semibold text-white hover:bg-white/10"
-            >
+            <Link href="/login" className="btn btnGhost btnLg">
               Log in
             </Link>
           </div>
         </div>
       </section>
 
-      {/* Footer */}
-      <footer className="border-t border-white/10">
-        <div className="mx-auto flex max-w-6xl flex-col gap-3 px-4 py-10 md:flex-row md:items-center md:justify-between">
-          <div className="text-sm text-white/60">© {new Date().getFullYear()} Vexta CRM</div>
-          <div className="flex gap-4 text-sm">
-            <Link href="/login" className="text-white/60 hover:text-white">
-              Log in
-            </Link>
-            <Link href="/signup" className="text-white/60 hover:text-white">
-              Sign up
-            </Link>
+      <footer className="footer">
+        <div className="wrap footerInner">
+          <div className="footerText">© {new Date().getFullYear()} Vexta CRM</div>
+          <div className="footerLinks">
+            <Link href="/login">Log in</Link>
+            <Link href="/signup">Sign up</Link>
           </div>
         </div>
       </footer>
+
+      <style jsx>{`
+        .page {
+          min-height: 100vh;
+          color: #fff;
+          background: #0a0a0a;
+        }
+        .bg {
+          position: fixed;
+          inset: 0;
+          z-index: -1;
+          background:
+            radial-gradient(1100px circle at 20% 10%, rgba(255, 255, 255, 0.12), transparent 60%),
+            radial-gradient(900px circle at 80% 30%, rgba(255, 255, 255, 0.10), transparent 55%),
+            linear-gradient(to bottom, #0a0a0a, #000);
+        }
+        .wrap {
+          width: 100%;
+          max-width: 1120px;
+          margin: 0 auto;
+          padding: 0 18px;
+        }
+
+        .header {
+          position: sticky;
+          top: 0;
+          z-index: 50;
+          border-bottom: 1px solid rgba(255, 255, 255, 0.10);
+          background: rgba(10, 10, 10, 0.75);
+          backdrop-filter: blur(10px);
+        }
+        .headerInner {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 14px 0;
+          gap: 12px;
+        }
+        .brand {
+          display: inline-flex;
+          align-items: center;
+          gap: 10px;
+          text-decoration: none;
+          color: #fff;
+        }
+        .logo {
+          width: 36px;
+          height: 36px;
+          border-radius: 12px;
+          background: #fff;
+        }
+        .brandName {
+          font-size: 18px;
+          font-weight: 800;
+          letter-spacing: -0.4px;
+        }
+        .nav {
+          display: none;
+          gap: 18px;
+        }
+        .nav a {
+          color: rgba(255, 255, 255, 0.75);
+          text-decoration: none;
+          font-size: 14px;
+          font-weight: 650;
+        }
+        .nav a:hover {
+          color: #fff;
+        }
+        .headerActions {
+          display: flex;
+          gap: 10px;
+          align-items: center;
+        }
+
+        .hero {
+          padding: 56px 0 22px;
+          display: grid;
+          gap: 24px;
+        }
+        .heroLeft {
+          max-width: 620px;
+        }
+        .pill {
+          display: inline-flex;
+          align-items: center;
+          gap: 10px;
+          padding: 8px 12px;
+          border-radius: 999px;
+          border: 1px solid rgba(255, 255, 255, 0.14);
+          background: rgba(255, 255, 255, 0.06);
+          font-size: 12px;
+          font-weight: 750;
+          color: rgba(255, 255, 255, 0.85);
+        }
+        .dot {
+          width: 4px;
+          height: 4px;
+          border-radius: 999px;
+          background: rgba(255, 255, 255, 0.45);
+        }
+        .h1 {
+          margin: 16px 0 0;
+          font-size: 40px;
+          line-height: 1.05;
+          letter-spacing: -1.1px;
+          font-weight: 900;
+        }
+        .muted {
+          color: rgba(255, 255, 255, 0.70);
+        }
+        .p {
+          margin: 14px 0 0;
+          font-size: 16px;
+          line-height: 1.55;
+          color: rgba(255, 255, 255, 0.72);
+          max-width: 560px;
+        }
+        .cta {
+          margin-top: 18px;
+          display: flex;
+          gap: 12px;
+          flex-wrap: wrap;
+        }
+        .bullets {
+          margin-top: 18px;
+          display: grid;
+          gap: 10px;
+          color: rgba(255, 255, 255, 0.75);
+          font-size: 14px;
+        }
+        .bullet {
+          display: flex;
+          gap: 10px;
+          align-items: flex-start;
+        }
+        .check {
+          color: #fff;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 22px;
+          height: 22px;
+          border-radius: 8px;
+          border: 1px solid rgba(255, 255, 255, 0.14);
+          background: rgba(255, 255, 255, 0.06);
+          flex: 0 0 auto;
+        }
+
+        .heroRight {
+          width: 100%;
+        }
+        .panel {
+          border-radius: 18px;
+          border: 1px solid rgba(255, 255, 255, 0.10);
+          background: rgba(255, 255, 255, 0.06);
+          box-shadow: 0 30px 120px rgba(0,0,0,0.55);
+          padding: 16px;
+        }
+        .panelTop {
+          display: flex;
+          align-items: flex-start;
+          justify-content: space-between;
+          gap: 12px;
+        }
+        .kicker {
+          font-size: 12px;
+          color: rgba(255, 255, 255, 0.60);
+        }
+        .panelTitle {
+          font-size: 18px;
+          font-weight: 850;
+          letter-spacing: -0.4px;
+          margin-top: 4px;
+        }
+        .badge {
+          font-size: 12px;
+          color: rgba(255, 255, 255, 0.70);
+          border: 1px solid rgba(255, 255, 255, 0.10);
+          background: rgba(0, 0, 0, 0.25);
+          padding: 6px 10px;
+          border-radius: 999px;
+          white-space: nowrap;
+        }
+        .cards {
+          margin-top: 14px;
+          display: grid;
+          gap: 10px;
+        }
+        .card {
+          border-radius: 14px;
+          border: 1px solid rgba(255, 255, 255, 0.10);
+          background: rgba(0, 0, 0, 0.25);
+          padding: 12px;
+        }
+        .cardTitle {
+          margin-top: 6px;
+          font-weight: 850;
+          letter-spacing: -0.2px;
+        }
+        .cardMeta {
+          margin-top: 6px;
+          font-size: 12px;
+          color: rgba(255, 255, 255, 0.60);
+          line-height: 1.4;
+        }
+
+        .miniStats {
+          margin-top: 12px;
+          display: grid;
+          grid-template-columns: repeat(3, 1fr);
+          gap: 10px;
+          text-align: center;
+        }
+        .mini {
+          border-radius: 14px;
+          border: 1px solid rgba(255, 255, 255, 0.10);
+          background: rgba(0, 0, 0, 0.25);
+          padding: 10px;
+        }
+        .miniTitle {
+          font-weight: 850;
+          color: #fff;
+        }
+        .miniSub {
+          margin-top: 4px;
+          font-size: 12px;
+          color: rgba(255, 255, 255, 0.60);
+        }
+
+        .section {
+          padding: 56px 0;
+          border-top: 1px solid rgba(255, 255, 255, 0.10);
+        }
+        .sectionAlt {
+          background: rgba(0, 0, 0, 0.15);
+        }
+        .h2 {
+          margin: 0;
+          font-size: 28px;
+          font-weight: 900;
+          letter-spacing: -0.6px;
+        }
+        .p2 {
+          margin: 10px 0 0;
+          color: rgba(255, 255, 255, 0.72);
+          max-width: 720px;
+          line-height: 1.55;
+        }
+        .grid3 {
+          margin-top: 22px;
+          display: grid;
+          grid-template-columns: 1fr;
+          gap: 12px;
+        }
+        .feature {
+          border-radius: 18px;
+          border: 1px solid rgba(255, 255, 255, 0.10);
+          background: rgba(255, 255, 255, 0.06);
+          padding: 16px;
+        }
+        .featureTitle {
+          font-weight: 900;
+          letter-spacing: -0.3px;
+        }
+        .featureDesc {
+          margin-top: 8px;
+          color: rgba(255, 255, 255, 0.70);
+          line-height: 1.5;
+          font-size: 14px;
+        }
+
+        .priceCard {
+          border-radius: 18px;
+          border: 1px solid rgba(255, 255, 255, 0.10);
+          background: rgba(255, 255, 255, 0.06);
+          padding: 16px;
+        }
+        .priceFeatured {
+          background: #fff;
+          color: #0a0a0a;
+          box-shadow: 0 30px 120px rgba(0,0,0,0.55);
+        }
+        .priceTop {
+          margin-bottom: 10px;
+        }
+        .priceName {
+          font-weight: 900;
+          letter-spacing: -0.2px;
+        }
+        .price {
+          margin-top: 8px;
+          font-size: 34px;
+          font-weight: 950;
+          letter-spacing: -1px;
+        }
+        .priceSub {
+          margin-top: 6px;
+          font-size: 13px;
+          opacity: 0.75;
+        }
+        .list {
+          margin: 14px 0 16px;
+          padding: 0;
+          list-style: none;
+          display: grid;
+          gap: 10px;
+          font-size: 14px;
+          line-height: 1.45;
+          color: inherit;
+        }
+        .list li {
+          display: flex;
+          align-items: flex-start;
+          gap: 10px;
+          opacity: 0.85;
+        }
+        .finePrint {
+          margin-top: 12px;
+          font-size: 12px;
+          color: rgba(255, 255, 255, 0.50);
+        }
+
+        .footer {
+          border-top: 1px solid rgba(255, 255, 255, 0.10);
+          padding: 28px 0;
+        }
+        .footerInner {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+          flex-wrap: wrap;
+        }
+        .footerText {
+          color: rgba(255, 255, 255, 0.60);
+          font-size: 13px;
+        }
+        .footerLinks {
+          display: flex;
+          gap: 14px;
+          font-size: 13px;
+        }
+        .footerLinks a {
+          color: rgba(255, 255, 255, 0.60);
+          text-decoration: none;
+          font-weight: 750;
+        }
+        .footerLinks a:hover {
+          color: #fff;
+        }
+
+        .btn {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+          padding: 10px 14px;
+          border-radius: 12px;
+          font-weight: 850;
+          font-size: 14px;
+          text-decoration: none;
+          cursor: pointer;
+          transition: transform 0.05s ease, background 0.15s ease, border-color 0.15s ease;
+          user-select: none;
+        }
+        .btn:active {
+          transform: translateY(1px);
+        }
+        .btnLg {
+          padding: 12px 16px;
+        }
+        .btnFull {
+          width: 100%;
+        }
+        .btnPrimary {
+          background: #fff;
+          color: #0a0a0a;
+          border: 1px solid rgba(255, 255, 255, 0.14);
+        }
+        .btnPrimary:hover {
+          background: rgba(255, 255, 255, 0.92);
+        }
+        .btnGhost {
+          background: rgba(255, 255, 255, 0.06);
+          color: #fff;
+          border: 1px solid rgba(255, 255, 255, 0.14);
+        }
+        .btnGhost:hover {
+          background: rgba(255, 255, 255, 0.10);
+        }
+        .btnDark {
+          background: #0a0a0a;
+          color: #fff;
+          border: 1px solid rgba(0, 0, 0, 0.25);
+        }
+        .btnDark:hover {
+          background: #121212;
+        }
+
+        @media (min-width: 860px) {
+          .nav {
+            display: flex;
+          }
+          .hero {
+            grid-template-columns: 1.1fr 0.9fr;
+            align-items: center;
+            padding: 72px 0 28px;
+          }
+          .h1 {
+            font-size: 52px;
+          }
+          .grid3 {
+            grid-template-columns: repeat(3, 1fr);
+          }
+        }
+      `}</style>
     </main>
   );
 }

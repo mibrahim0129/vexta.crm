@@ -2,13 +2,13 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 
 function GoogleIcon() {
   return (
-    <svg viewBox="0 0 48 48" className="h-5 w-5" aria-hidden="true">
+    <svg viewBox="0 0 48 48" width="18" height="18" aria-hidden="true">
       <path
         fill="#FFC107"
         d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.3 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34.1 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.1-.1-2.3-.4-3.5z"
@@ -31,13 +31,12 @@ function GoogleIcon() {
 
 function LoginInner() {
   const router = useRouter();
-  const searchParams = useSearchParams();
+  const sp = useSearchParams();
 
-  // support both ?redirectTo= and ?next= just in case
   const redirectTo = useMemo(() => {
-    const r = searchParams.get("redirectTo") || searchParams.get("next");
+    const r = sp.get("redirectTo") || sp.get("next");
     return r && r.startsWith("/") ? r : "/dashboard";
-  }, [searchParams]);
+  }, [sp]);
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -85,7 +84,7 @@ function LoginInner() {
       const supabase = createSupabaseBrowserClient();
       const origin = window.location.origin;
 
-      // IMPORTANT: your callback uses ?next=
+      // IMPORTANT: your existing callback uses ?next=
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: {
@@ -97,7 +96,6 @@ function LoginInner() {
         setError(error.message || "Google sign-in failed.");
         setOauthLoading(false);
       }
-      // On success, browser redirects away.
     } catch (e) {
       setError("Google sign-in failed. Please try again.");
       setOauthLoading(false);
@@ -105,148 +103,355 @@ function LoginInner() {
   }
 
   return (
-    <main className="min-h-screen bg-zinc-950 text-white">
-      <div className="pointer-events-none fixed inset-0 -z-10">
-        <div className="absolute inset-0 bg-[radial-gradient(1000px_circle_at_20%_10%,rgba(255,255,255,0.10),transparent_60%)]" />
-        <div className="absolute inset-0 bg-[radial-gradient(900px_circle_at_80%_35%,rgba(255,255,255,0.08),transparent_55%)]" />
-        <div className="absolute inset-0 bg-gradient-to-b from-zinc-950 via-zinc-950 to-black" />
-      </div>
+    <main className="page">
+      <div className="bg" />
 
-      <div className="mx-auto grid min-h-screen max-w-6xl items-center gap-10 px-4 py-12 md:grid-cols-2">
-        {/* Left panel */}
-        <div className="hidden md:block">
-          <Link href="/" className="inline-flex items-center gap-2">
-            <div className="h-9 w-9 rounded-xl bg-white" />
-            <span className="text-lg font-semibold tracking-tight">Vexta</span>
+      <div className="wrap layout">
+        <div className="left">
+          <Link href="/" className="brand">
+            <span className="logo" />
+            <span className="brandName">Vexta</span>
           </Link>
 
-          <h1 className="mt-6 text-4xl font-semibold tracking-tight">Welcome back.</h1>
-          <p className="mt-3 max-w-md text-white/70">
+          <h1 className="h1">Welcome back.</h1>
+          <p className="p">
             Log in to manage contacts, deals, tasks, notes, and calendar events — all linked,
             fast, and clean.
           </p>
 
-          <div className="mt-8 grid gap-3 max-w-md">
+          <div className="leftStack">
             {[
               "Contact profile hub (deals/notes/tasks/events)",
               "Deal pages with task buckets + event visibility",
               "Filters designed for daily execution",
             ].map((t) => (
-              <div
-                key={t}
-                className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white/75"
-              >
+              <div key={t} className="leftItem">
                 {t}
               </div>
             ))}
           </div>
         </div>
 
-        {/* Auth card */}
-        <div className="mx-auto w-full max-w-md">
-          <div className="rounded-2xl border border-white/10 bg-white/5 p-6 shadow-[0_20px_80px_rgba(0,0,0,0.55)]">
-            <div className="md:hidden">
-              <Link href="/" className="inline-flex items-center gap-2">
-                <div className="h-9 w-9 rounded-xl bg-white" />
-                <span className="text-lg font-semibold tracking-tight">Vexta</span>
+        <div className="right">
+          <div className="card">
+            <div className="mobileBrand">
+              <Link href="/" className="brand">
+                <span className="logo" />
+                <span className="brandName">Vexta</span>
               </Link>
             </div>
 
-            <h2 className="mt-4 text-2xl font-semibold tracking-tight md:mt-0">Log in</h2>
-            <p className="mt-1 text-sm text-white/60">Access your dashboard.</p>
+            <h2 className="h2">Log in</h2>
+            <p className="sub">Access your dashboard.</p>
 
-            {error ? (
-              <div className="mt-4 rounded-xl border border-red-400/20 bg-red-500/10 px-4 py-3 text-sm text-red-200">
-                {error}
-              </div>
-            ) : null}
+            {error ? <div className="error">{error}</div> : null}
 
             <button
               type="button"
+              className="btn btnPrimary btnFull"
               onClick={signInWithGoogle}
-              disabled={oauthLoading || loading}
-              className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-white px-4 py-2 text-sm font-semibold text-zinc-950 hover:bg-zinc-100 disabled:opacity-60"
+              disabled={loading || oauthLoading}
             >
               <GoogleIcon />
               {oauthLoading ? "Connecting..." : "Continue with Google"}
             </button>
 
-            <div className="my-5 flex items-center gap-3">
-              <div className="h-px flex-1 bg-white/10" />
-              <div className="text-xs text-white/50">or</div>
-              <div className="h-px flex-1 bg-white/10" />
+            <div className="orRow">
+              <div className="line" />
+              <div className="or">or</div>
+              <div className="line" />
             </div>
 
-            <form onSubmit={onSubmit} className="space-y-4">
-              <div>
-                <label className="text-sm font-medium text-white/80">Email</label>
+            <form onSubmit={onSubmit} className="form">
+              <label className="label">
+                Email
                 <input
-                  className="mt-1 w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white outline-none placeholder:text-white/35 focus:ring-2"
+                  className="input"
                   type="email"
                   autoComplete="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="you@email.com"
                 />
-              </div>
+              </label>
 
-              <div>
-                <label className="text-sm font-medium text-white/80">Password</label>
+              <label className="label">
+                Password
                 <input
-                  className="mt-1 w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white outline-none placeholder:text-white/35 focus:ring-2"
+                  className="input"
                   type="password"
                   autoComplete="current-password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
                 />
-              </div>
+              </label>
 
               <button
                 type="submit"
+                className="btn btnGhost btnFull"
                 disabled={loading || oauthLoading}
-                className="w-full rounded-xl bg-white px-4 py-2 text-sm font-semibold text-zinc-950 hover:bg-zinc-100 disabled:opacity-60"
               >
                 {loading ? "Logging in..." : "Log in"}
               </button>
             </form>
 
-            <div className="mt-6 flex items-center justify-between text-sm">
-              <Link href="/signup" className="text-white/70 hover:text-white">
-                Create an account
-              </Link>
-              <Link href="/" className="text-white/70 hover:text-white">
-                Back to home
-              </Link>
+            <div className="bottomLinks">
+              <Link href="/signup">Create an account</Link>
+              <Link href="/">Back to home</Link>
             </div>
           </div>
 
-          <p className="mt-4 text-center text-xs text-white/45">
+          <div className="fine">
             By continuing, you agree to basic terms and privacy.
-          </p>
+          </div>
         </div>
       </div>
+
+      <style jsx>{`
+        .page {
+          min-height: 100vh;
+          color: #fff;
+          background: #0a0a0a;
+          display: grid;
+          place-items: center;
+        }
+        .bg {
+          position: fixed;
+          inset: 0;
+          z-index: -1;
+          background:
+            radial-gradient(1000px circle at 20% 10%, rgba(255, 255, 255, 0.12), transparent 60%),
+            radial-gradient(900px circle at 80% 35%, rgba(255, 255, 255, 0.10), transparent 55%),
+            linear-gradient(to bottom, #0a0a0a, #000);
+        }
+        .wrap {
+          width: 100%;
+          max-width: 1120px;
+          padding: 24px 18px;
+        }
+        .layout {
+          display: grid;
+          gap: 18px;
+        }
+
+        .brand {
+          display: inline-flex;
+          align-items: center;
+          gap: 10px;
+          text-decoration: none;
+          color: #fff;
+        }
+        .logo {
+          width: 36px;
+          height: 36px;
+          border-radius: 12px;
+          background: #fff;
+        }
+        .brandName {
+          font-size: 18px;
+          font-weight: 900;
+          letter-spacing: -0.4px;
+        }
+
+        .left {
+          display: none;
+        }
+        .h1 {
+          margin: 18px 0 0;
+          font-size: 42px;
+          letter-spacing: -1px;
+          font-weight: 950;
+          line-height: 1.05;
+        }
+        .p {
+          margin: 12px 0 0;
+          max-width: 520px;
+          color: rgba(255, 255, 255, 0.72);
+          line-height: 1.55;
+        }
+        .leftStack {
+          margin-top: 18px;
+          display: grid;
+          gap: 10px;
+          max-width: 520px;
+        }
+        .leftItem {
+          border-radius: 16px;
+          border: 1px solid rgba(255, 255, 255, 0.10);
+          background: rgba(255, 255, 255, 0.06);
+          padding: 12px 14px;
+          color: rgba(255, 255, 255, 0.75);
+          font-size: 14px;
+          line-height: 1.35;
+        }
+
+        .right {
+          display: grid;
+          gap: 10px;
+          justify-items: center;
+        }
+        .card {
+          width: 100%;
+          max-width: 460px;
+          border-radius: 18px;
+          border: 1px solid rgba(255, 255, 255, 0.10);
+          background: rgba(255, 255, 255, 0.06);
+          box-shadow: 0 30px 120px rgba(0, 0, 0, 0.55);
+          padding: 18px;
+        }
+        .mobileBrand {
+          margin-bottom: 10px;
+        }
+        .h2 {
+          margin: 6px 0 0;
+          font-size: 26px;
+          font-weight: 950;
+          letter-spacing: -0.6px;
+        }
+        .sub {
+          margin: 8px 0 0;
+          color: rgba(255, 255, 255, 0.65);
+          font-size: 13px;
+        }
+        .error {
+          margin-top: 12px;
+          border-radius: 14px;
+          border: 1px solid rgba(239, 68, 68, 0.35);
+          background: rgba(239, 68, 68, 0.10);
+          color: #fecaca;
+          padding: 12px;
+          font-weight: 850;
+          font-size: 13px;
+          line-height: 1.35;
+        }
+
+        .orRow {
+          margin: 14px 0;
+          display: flex;
+          align-items: center;
+          gap: 10px;
+        }
+        .line {
+          height: 1px;
+          flex: 1;
+          background: rgba(255, 255, 255, 0.10);
+        }
+        .or {
+          font-size: 12px;
+          color: rgba(255, 255, 255, 0.55);
+          font-weight: 800;
+        }
+
+        .form {
+          display: grid;
+          gap: 12px;
+          margin-top: 6px;
+        }
+        .label {
+          display: grid;
+          gap: 6px;
+          font-size: 12px;
+          font-weight: 900;
+          color: rgba(255, 255, 255, 0.80);
+        }
+        .input {
+          width: 100%;
+          border-radius: 14px;
+          border: 1px solid rgba(255, 255, 255, 0.10);
+          background: rgba(0, 0, 0, 0.28);
+          padding: 10px 12px;
+          color: #fff;
+          outline: none;
+          font-size: 14px;
+        }
+        .input::placeholder {
+          color: rgba(255, 255, 255, 0.35);
+        }
+
+        .btn {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          gap: 10px;
+          padding: 10px 12px;
+          border-radius: 14px;
+          border: 1px solid rgba(255, 255, 255, 0.12);
+          font-weight: 900;
+          font-size: 14px;
+          cursor: pointer;
+          user-select: none;
+          transition: transform 0.05s ease, background 0.15s ease;
+          color: #fff;
+          background: rgba(255, 255, 255, 0.06);
+        }
+        .btn:active {
+          transform: translateY(1px);
+        }
+        .btn:disabled {
+          opacity: 0.65;
+          cursor: not-allowed;
+        }
+        .btnFull {
+          width: 100%;
+        }
+        .btnPrimary {
+          background: #fff;
+          color: #0a0a0a;
+        }
+        .btnPrimary:hover {
+          background: rgba(255, 255, 255, 0.92);
+        }
+        .btnGhost:hover {
+          background: rgba(255, 255, 255, 0.10);
+        }
+
+        .bottomLinks {
+          margin-top: 14px;
+          display: flex;
+          justify-content: space-between;
+          gap: 12px;
+          font-size: 13px;
+        }
+        .bottomLinks :global(a) {
+          color: rgba(255, 255, 255, 0.70);
+          text-decoration: none;
+          font-weight: 850;
+        }
+        .bottomLinks :global(a:hover) {
+          color: #fff;
+          text-decoration: underline;
+        }
+
+        .fine {
+          font-size: 12px;
+          color: rgba(255, 255, 255, 0.45);
+          text-align: center;
+          max-width: 460px;
+        }
+
+        @media (min-width: 920px) {
+          .layout {
+            grid-template-columns: 1.05fr 0.95fr;
+            align-items: center;
+            gap: 26px;
+          }
+          .left {
+            display: block;
+            padding-right: 10px;
+          }
+          .mobileBrand {
+            display: none;
+          }
+        }
+      `}</style>
     </main>
   );
 }
 
 export default function LoginPage() {
   return (
-    <Suspense
-      fallback={
-        <main className="min-h-screen bg-zinc-950 text-white">
-          <div className="mx-auto flex min-h-screen max-w-6xl items-center justify-center px-4 py-12">
-            <div className="w-full max-w-md rounded-2xl border border-white/10 bg-white/5 p-6">
-              <div className="h-6 w-40 rounded bg-white/10" />
-              <div className="mt-4 h-4 w-64 rounded bg-white/10" />
-              <div className="mt-7 h-10 w-full rounded bg-white/10" />
-              <div className="mt-3 h-10 w-full rounded bg-white/10" />
-              <div className="mt-3 h-10 w-full rounded bg-white/10" />
-            </div>
-          </div>
-        </main>
-      }
-    >
+    <Suspense fallback={<div style={{ minHeight: "100vh", background: "#000" }} />}>
       <LoginInner />
     </Suspense>
   );
