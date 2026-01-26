@@ -19,8 +19,10 @@ export default function TasksPage() {
   const [tasks, setTasks] = useState([]);
 
   // Filters
+  const [filterStatus, setFilterStatus] = useState("open"); // open | all | completed
   const [filterContactId, setFilterContactId] = useState("all");
-  const [filterStatus, setFilterStatus] = useState("open"); // open | done | all
+  const [filterDealId, setFilterDealId] = useState("all");
+  const [filterDue, setFilterDue] = useState("all"); // all | today | overdue | next7
 
   // Form
   const [form, setForm] = useState({
@@ -40,14 +42,66 @@ export default function TasksPage() {
     return data.session;
   }
 
+  function isoFromLocalDatetime(v) {
+    if (!v) return null;
+    const d = new Date(v);
+    return Number.isNaN(d.getTime()) ? null : d.toISOString();
+  }
+
+  function startOfTodayLocal() {
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+  }
+
+  function endOfTodayLocal() {
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+  }
+
+  function isOverdue(dueAtIso, completed) {
+    if (completed) return false;
+    if (!dueAtIso) return false;
+    const due = new Date(dueAtIso);
+    if (Number.isNaN(due.getTime())) return false;
+    return due.getTime() < new Date().getTime();
+  }
+
+  function isToday(dueAtIso) {
+    if (!dueAtIso) return false;
+    const due = new Date(dueAtIso);
+    if (Number.isNaN(due.getTime())) return false;
+    const start = startOfTodayLocal().getTime();
+    const end = endOfTodayLocal().getTime();
+    return due.getTime() >= start && due.getTime() <= end;
+  }
+
+  function isWithinNext7Days(dueAtIso) {
+    if (!dueAtIso) return false;
+    const due = new Date(dueAtIso);
+    if (Number.isNaN(due.getTime())) return false;
+    const now = new Date().getTime();
+    const seven = now + 7 * 24 * 60 * 60 * 1000;
+    return due.getTime() >= now && due.getTime() <= seven;
+  }
+
+  function contactNameById(id) {
+    const c = contacts.find((x) => x.id === id);
+    const name = `${c?.first_name || ""} ${c?.last_name || ""}`.trim();
+    return name || "Unnamed";
+  }
+
+  function dealTitleById(id) {
+    const d = deals.find((x) => x.id === id);
+    return d?.title || "—";
+  }
+
   async function loadContacts() {
     const { data, error } = await sb
       .from("contacts")
-      .select("id, first_name, last_name")
+      .select("id, first_name, last_name, created_at")
       .order("created_at", { ascending: false });
 
     if (error) throw error;
-
     const list = Array.isArray(data) ? data : [];
     setContacts(list);
 
@@ -56,19 +110,13 @@ export default function TasksPage() {
     }
   }
 
-  async function loadDeals(contactIdForDeals) {
-    let q = sb
+  async function loadDeals() {
+    const { data, error } = await sb
       .from("deals")
-      .select("id, title, contact_id")
+      .select("id, title, contact_id, created_at")
       .order("created_at", { ascending: false });
 
-    if (contactIdForDeals && contactIdForDeals !== "all") {
-      q = q.eq("contact_id", contactIdForDeals);
-    }
-
-    const { data, error } = await q;
     if (error) throw error;
-
     setDeals(Array.isArray(data) ? data : []);
   }
 
@@ -80,29 +128,12 @@ export default function TasksPage() {
     setLoading(true);
 
     try {
-      let q = sb
+      // Pull all tasks for this user; filters happen client-side for simplicity
+      const { data, error } = await sb
         .from("tasks")
-        .select(
-          `
-          id,
-          title,
-          description,
-          due_at,
-          completed,
-          contact_id,
-          deal_id,
-          created_at,
-          contacts:contact_id ( id, first_name, last_name ),
-          deals:deal_id ( id, title )
-        `
-        )
+        .select("*")
         .order("created_at", { ascending: false });
 
-      if (filterContactId !== "all") q = q.eq("contact_id", filterContactId);
-      if (filterStatus === "open") q = q.eq("completed", false);
-      if (filterStatus === "done") q = q.eq("completed", true);
-
-      const { data, error } = await q;
       if (error) throw error;
 
       setTasks(Array.isArray(data) ? data : []);
@@ -122,9 +153,7 @@ export default function TasksPage() {
       const session = await requireSession();
       if (!session) return;
 
-      await loadContacts();
-      await loadDeals(filterContactId === "all" ? form.contact_id : filterContactId);
-      await loadTasks();
+      await Promise.all([loadContacts(), loadDeals(), loadTasks()]);
     } catch (e) {
       console.error(e);
       setErr(e?.message || "Failed to load data");
@@ -137,68 +166,41 @@ export default function TasksPage() {
     e.preventDefault();
     setErr("");
 
-    const title = form.title.trim();
-    if (!title) {
-      setErr("Task title can’t be empty.");
-      return;
-    }
-    if (!form.contact_id) {
-      setErr("Please select a contact.");
-      return;
-    }
+    const title = (form.title || "").trim();
+    if (!title) return setErr("Task title can’t be empty.");
+    if (!form.contact_id) return setErr("Please select a contact.");
+
+    const dueIso = isoFromLocalDatetime(form.due_at);
 
     setSaving(true);
     try {
       const session = await requireSession();
       if (!session) return;
 
-      const dealId = form.deal_id ? form.deal_id : null;
-
-      const dueAt = form.due_at ? new Date(form.due_at) : null;
-      const dueAtIso = dueAt && !Number.isNaN(dueAt.getTime()) ? dueAt.toISOString() : null;
-
       const payload = {
         user_id: session.user.id,
         contact_id: form.contact_id,
-        deal_id: dealId,
+        deal_id: form.deal_id ? form.deal_id : null,
         title,
         description: form.description.trim() ? form.description.trim() : null,
-        due_at: dueAtIso,
+        due_at: dueIso,
         completed: false,
       };
 
-      const { data, error } = await sb
-        .from("tasks")
-        .insert([payload])
-        .select(
-          `
-          id,
-          title,
-          description,
-          due_at,
-          completed,
-          contact_id,
-          deal_id,
-          created_at,
-          contacts:contact_id ( id, first_name, last_name ),
-          deals:deal_id ( id, title )
-        `
-        )
-        .single();
-
+      const { data, error } = await sb.from("tasks").insert([payload]).select("*").single();
       if (error) throw error;
 
       setTasks((prev) => [data, ...prev]);
       setForm((p) => ({ ...p, title: "", description: "", due_at: "" }));
-    } catch (e) {
-      console.error(e);
-      setErr(e?.message || "Failed to add task");
+    } catch (e2) {
+      console.error(e2);
+      setErr(e2?.message || "Failed to add task");
     } finally {
       setSaving(false);
     }
   }
 
-  async function toggleTask(task) {
+  async function toggleTask(t) {
     setErr("");
     try {
       const session = await requireSession();
@@ -206,34 +208,21 @@ export default function TasksPage() {
 
       const { data, error } = await sb
         .from("tasks")
-        .update({ completed: !task.completed })
-        .eq("id", task.id)
-        .select(
-          `
-          id,
-          title,
-          description,
-          due_at,
-          completed,
-          contact_id,
-          deal_id,
-          created_at,
-          contacts:contact_id ( id, first_name, last_name ),
-          deals:deal_id ( id, title )
-        `
-        )
+        .update({ completed: !t.completed })
+        .eq("id", t.id)
+        .select("*")
         .single();
 
       if (error) throw error;
 
-      setTasks((prev) => prev.map((t) => (t.id === task.id ? data : t)));
+      setTasks((prev) => prev.map((x) => (x.id === t.id ? data : x)));
     } catch (e) {
       console.error(e);
       setErr(e?.message || "Failed to update task");
     }
   }
 
-  async function deleteTask(taskId) {
+  async function deleteTask(id) {
     setErr("");
     const ok = confirm("Delete this task?");
     if (!ok) return;
@@ -242,30 +231,26 @@ export default function TasksPage() {
       const session = await requireSession();
       if (!session) return;
 
-      const { error } = await sb.from("tasks").delete().eq("id", taskId);
+      const { error } = await sb.from("tasks").delete().eq("id", id);
       if (error) throw error;
 
-      setTasks((prev) => prev.filter((t) => t.id !== taskId));
+      setTasks((prev) => prev.filter((x) => x.id !== id));
     } catch (e) {
       console.error(e);
       setErr(e?.message || "Failed to delete task");
     }
   }
 
-  useEffect(() => {
-    (async () => {
-      await loadDeals(filterContactId === "all" ? form.contact_id : filterContactId);
-      await loadTasks();
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filterContactId, filterStatus]);
-
+  // Keep deal dropdown relevant when contact changes
   useEffect(() => {
     if (!form.contact_id) return;
-    (async () => {
-      await loadDeals(form.contact_id);
-      setForm((p) => ({ ...p, deal_id: "" }));
-    })();
+    // If the selected deal doesn't belong to selected contact, clear it
+    if (form.deal_id) {
+      const d = deals.find((x) => x.id === form.deal_id);
+      if (d && d.contact_id !== form.contact_id) {
+        setForm((p) => ({ ...p, deal_id: "" }));
+      }
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form.contact_id]);
 
@@ -281,10 +266,10 @@ export default function TasksPage() {
           if (mountedRef.current) loadTasks();
         })
         .on("postgres_changes", { event: "*", schema: "public", table: "contacts" }, () => {
-          if (mountedRef.current) loadAll();
+          if (mountedRef.current) loadContacts();
         })
         .on("postgres_changes", { event: "*", schema: "public", table: "deals" }, () => {
-          if (mountedRef.current) loadAll();
+          if (mountedRef.current) loadDeals();
         })
         .subscribe((status) => setRtStatus(String(status || "").toLowerCase()));
 
@@ -297,6 +282,31 @@ export default function TasksPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const filteredTasks = tasks
+    .filter((t) => {
+      // Status
+      if (filterStatus === "open" && t.completed) return false;
+      if (filterStatus === "completed" && !t.completed) return false;
+
+      // Contact / Deal
+      if (filterContactId !== "all" && t.contact_id !== filterContactId) return false;
+      if (filterDealId !== "all" && t.deal_id !== filterDealId) return false;
+
+      // Due
+      if (filterDue === "today" && !isToday(t.due_at)) return false;
+      if (filterDue === "overdue" && !isOverdue(t.due_at, t.completed)) return false;
+      if (filterDue === "next7" && !isWithinNext7Days(t.due_at)) return false;
+
+      return true;
+    })
+    .sort((a, b) => {
+      // Sort by due date first (soonest first), then created_at
+      const ad = a.due_at ? new Date(a.due_at).getTime() : Number.POSITIVE_INFINITY;
+      const bd = b.due_at ? new Date(b.due_at).getTime() : Number.POSITIVE_INFINITY;
+      if (ad !== bd) return ad - bd;
+      return String(b.created_at || "").localeCompare(String(a.created_at || ""));
+    });
+
   const canCreate = contacts.length > 0;
 
   return (
@@ -305,37 +315,11 @@ export default function TasksPage() {
         <div>
           <h1 style={styles.h1}>Tasks</h1>
           <p style={styles.sub}>
-            Activity log • Realtime: <span style={styles.badge}>{rtStatus}</span>
+            Daily to-dos • Realtime: <span style={styles.badge}>{rtStatus}</span>
           </p>
         </div>
 
         <div style={styles.headerRight}>
-          <select
-            value={filterStatus}
-            onChange={(e) => setFilterStatus(e.target.value)}
-            style={styles.selectSmall}
-          >
-            <option value="open">Open</option>
-            <option value="done">Completed</option>
-            <option value="all">All</option>
-          </select>
-
-          <select
-            value={filterContactId}
-            onChange={(e) => setFilterContactId(e.target.value)}
-            style={styles.selectSmall}
-          >
-            <option value="all">All contacts</option>
-            {contacts.map((c) => {
-              const name = `${c.first_name || ""} ${c.last_name || ""}`.trim() || "Unnamed";
-              return (
-                <option key={c.id} value={c.id}>
-                  {name}
-                </option>
-              );
-            })}
-          </select>
-
           <button onClick={loadAll} disabled={loading} style={styles.btnGhost}>
             {loading ? "Refreshing..." : "Refresh"}
           </button>
@@ -344,6 +328,7 @@ export default function TasksPage() {
 
       {err ? <div style={styles.alert}>{err}</div> : null}
 
+      {/* Add Task */}
       <div style={styles.card}>
         <h2 style={styles.h2}>Add Task</h2>
 
@@ -358,14 +343,11 @@ export default function TasksPage() {
               {contacts.length === 0 ? (
                 <option value="">No contacts found</option>
               ) : (
-                contacts.map((c) => {
-                  const name = `${c.first_name || ""} ${c.last_name || ""}`.trim() || "Unnamed";
-                  return (
-                    <option key={c.id} value={c.id}>
-                      {name}
-                    </option>
-                  );
-                })
+                contacts.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {`${c.first_name || ""} ${c.last_name || ""}`.trim() || "Unnamed"}
+                  </option>
+                ))
               )}
             </select>
 
@@ -376,11 +358,13 @@ export default function TasksPage() {
               disabled={!canCreate}
             >
               <option value="">No deal (optional)</option>
-              {deals.map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.title}
-                </option>
-              ))}
+              {deals
+                .filter((d) => !form.contact_id || d.contact_id === form.contact_id)
+                .map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.title}
+                  </option>
+                ))}
             </select>
           </div>
 
@@ -397,7 +381,7 @@ export default function TasksPage() {
             onChange={(e) => setForm((p) => ({ ...p, description: e.target.value }))}
             placeholder="Description (optional)..."
             style={styles.textarea}
-            rows={3}
+            rows={2}
             disabled={!canCreate}
           />
 
@@ -425,83 +409,126 @@ export default function TasksPage() {
         </form>
       </div>
 
-      <div style={{ marginTop: 18 }}>
-        <h2 style={styles.h2}>
-          Tasks {loading ? "(loading...)" : `(${tasks.length})`}
-        </h2>
+      {/* Filters */}
+      <div style={styles.card}>
+        <div style={styles.cardHeader}>
+          <h2 style={styles.h2}>
+            List {loading ? "(loading...)" : `(${filteredTasks.length})`}
+          </h2>
+        </div>
 
+        <div style={styles.filters}>
+          <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} style={styles.selectSmall}>
+            <option value="open">Open</option>
+            <option value="all">All</option>
+            <option value="completed">Completed</option>
+          </select>
+
+          <select value={filterDue} onChange={(e) => setFilterDue(e.target.value)} style={styles.selectSmall}>
+            <option value="all">All due dates</option>
+            <option value="today">Due today</option>
+            <option value="overdue">Overdue</option>
+            <option value="next7">Next 7 days</option>
+          </select>
+
+          <select value={filterContactId} onChange={(e) => setFilterContactId(e.target.value)} style={styles.selectSmall}>
+            <option value="all">All contacts</option>
+            {contacts.map((c) => (
+              <option key={c.id} value={c.id}>
+                {`${c.first_name || ""} ${c.last_name || ""}`.trim() || "Unnamed"}
+              </option>
+            ))}
+          </select>
+
+          <select
+            value={filterDealId}
+            onChange={(e) => setFilterDealId(e.target.value)}
+            style={styles.selectSmall}
+            disabled={filterContactId === "all" ? false : false}
+          >
+            <option value="all">All deals</option>
+            {deals
+              .filter((d) => (filterContactId === "all" ? true : d.contact_id === filterContactId))
+              .map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.title}
+                </option>
+              ))}
+          </select>
+        </div>
+      </div>
+
+      {/* Tasks */}
+      <div style={{ marginTop: 12 }}>
         {loading ? (
           <div style={{ opacity: 0.75 }}>Loading…</div>
-        ) : tasks.length === 0 ? (
-          <div style={{ opacity: 0.75 }}>No tasks yet.</div>
+        ) : filteredTasks.length === 0 ? (
+          <div style={{ opacity: 0.75 }}>No tasks match your filters.</div>
         ) : (
-          <div style={{ display: "grid", gap: 10, marginTop: 10 }}>
-            {tasks.map((t) => {
-              const c = t.contacts;
-              const d = t.deals;
-
-              const contactName = c
-                ? `${c.first_name || ""} ${c.last_name || ""}`.trim() || "Unnamed"
-                : "Unknown";
+          <div style={{ display: "grid", gap: 10 }}>
+            {filteredTasks.map((t) => {
+              const overdue = isOverdue(t.due_at, t.completed);
+              const dueToday = isToday(t.due_at);
 
               return (
                 <div key={t.id} style={styles.item}>
-                  <div style={styles.itemTop}>
-                    <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+                    <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
                       <button
                         onClick={() => toggleTask(t)}
                         style={t.completed ? styles.chkOn : styles.chkOff}
                         title={t.completed ? "Mark as open" : "Mark as done"}
                         type="button"
                       />
-                      <div style={{ display: "grid", gap: 4 }}>
-                        <div style={{ fontWeight: 950, opacity: t.completed ? 0.55 : 1, textDecoration: t.completed ? "line-through" : "none" }}>
+                      <div style={{ display: "grid", gap: 6, minWidth: 0 }}>
+                        <div
+                          style={{
+                            fontWeight: 950,
+                            opacity: t.completed ? 0.55 : 1,
+                            textDecoration: t.completed ? "line-through" : "none",
+                          }}
+                        >
                           {t.title}
                         </div>
+
                         {t.description ? (
                           <div style={{ opacity: 0.85, whiteSpace: "pre-wrap", lineHeight: 1.45 }}>
                             {t.description}
                           </div>
                         ) : null}
+
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 10, fontSize: 13, opacity: 0.95 }}>
+                          <div>
+                            <span style={{ opacity: 0.75 }}>Contact:</span>{" "}
+                            {t.contact_id ? (
+                              <Link href={`/dashboard/contacts/${t.contact_id}`} style={styles.link}>
+                                {contactNameById(t.contact_id)}
+                              </Link>
+                            ) : (
+                              <span>—</span>
+                            )}
+                          </div>
+
+                          <div>
+                            <span style={{ opacity: 0.75 }}>Deal:</span>{" "}
+                            <span style={{ fontWeight: 900 }}>{t.deal_id ? dealTitleById(t.deal_id) : "—"}</span>
+                          </div>
+
+                          <div>
+                            <span style={{ opacity: 0.75 }}>Due:</span>{" "}
+                            <span style={{ fontWeight: 900 }}>
+                              {t.due_at ? new Date(t.due_at).toLocaleString() : "—"}
+                            </span>
+                            {overdue ? <span style={styles.badgeRed}> Overdue</span> : null}
+                            {dueToday && !overdue ? <span style={styles.badgeBlue}> Today</span> : null}
+                          </div>
+                        </div>
                       </div>
                     </div>
 
                     <button onClick={() => deleteTask(t.id)} style={styles.btnDanger} type="button">
                       Delete
                     </button>
-                  </div>
-
-                  <div style={styles.itemMeta}>
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
-                      <div>
-                        <span style={{ opacity: 0.75 }}>Contact:</span>{" "}
-                        {t.contact_id ? (
-                          <Link href={`/dashboard/contacts/${t.contact_id}`} style={styles.link}>
-                            {contactName}
-                          </Link>
-                        ) : (
-                          <span>{contactName}</span>
-                        )}
-                      </div>
-
-                      {d?.title ? (
-                        <div>
-                          <span style={{ opacity: 0.75 }}>Deal:</span>{" "}
-                          <span style={{ fontWeight: 900 }}>{d.title}</span>
-                        </div>
-                      ) : null}
-
-                      <div>
-                        <span style={{ opacity: 0.75 }}>Due:</span>{" "}
-                        <span style={{ fontWeight: 900 }}>
-                          {t.due_at ? new Date(t.due_at).toLocaleString() : "—"}
-                        </span>
-                      </div>
-                    </div>
-
-                    <div style={{ opacity: 0.75 }}>
-                      Created: {t.created_at ? new Date(t.created_at).toLocaleString() : "—"}
-                    </div>
                   </div>
                 </div>
               );
@@ -515,7 +542,7 @@ export default function TasksPage() {
 
 const styles = {
   header: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 },
-  headerRight: { display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" },
+  headerRight: { display: "flex", gap: 10, alignItems: "center" },
 
   h1: { margin: 0, fontSize: 28, fontWeight: 950 },
   sub: { marginTop: 6, opacity: 0.75 },
@@ -530,14 +557,53 @@ const styles = {
     fontSize: 12,
   },
 
+  badgeRed: {
+    marginLeft: 8,
+    display: "inline-block",
+    padding: "2px 10px",
+    borderRadius: 999,
+    border: "1px solid rgba(239,68,68,0.35)",
+    background: "rgba(239,68,68,0.10)",
+    color: "#fecaca",
+    fontWeight: 950,
+    fontSize: 12,
+  },
+
+  badgeBlue: {
+    marginLeft: 8,
+    display: "inline-block",
+    padding: "2px 10px",
+    borderRadius: 999,
+    border: "1px solid rgba(59,130,246,0.35)",
+    background: "rgba(59,130,246,0.10)",
+    color: "#bfdbfe",
+    fontWeight: 950,
+    fontSize: 12,
+  },
+
   h2: { margin: 0, fontSize: 18, fontWeight: 900 },
 
   card: {
-    marginTop: 18,
+    marginTop: 14,
     padding: 16,
     border: "1px solid #242424",
     borderRadius: 16,
     background: "#111111",
+  },
+
+  cardHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 10,
+  },
+
+  filters: {
+    marginTop: 12,
+    display: "flex",
+    gap: 10,
+    flexWrap: "wrap",
+    alignItems: "center",
   },
 
   form: { marginTop: 12, display: "grid", gap: 10 },
@@ -616,16 +682,6 @@ const styles = {
     height: "fit-content",
   },
 
-  alert: {
-    marginTop: 14,
-    padding: 12,
-    borderRadius: 12,
-    background: "#1a0f0f",
-    border: "1px solid #5a1f1f",
-    color: "#ffd6d6",
-    fontWeight: 900,
-  },
-
   item: {
     padding: 14,
     borderRadius: 16,
@@ -634,27 +690,6 @@ const styles = {
     display: "grid",
     gap: 10,
   },
-
-  itemTop: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
-    gap: 12,
-  },
-
-  itemMeta: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    gap: 12,
-    paddingTop: 8,
-    borderTop: "1px solid #242424",
-    opacity: 0.95,
-    fontSize: 13,
-    flexWrap: "wrap",
-  },
-
-  link: { color: "white", fontWeight: 950, textDecoration: "underline" },
 
   chkOff: {
     width: 18,
@@ -672,5 +707,17 @@ const styles = {
     border: "1px solid rgba(255,255,255,0.22)",
     background: "#f5f5f5",
     cursor: "pointer",
+  },
+
+  link: { color: "white", fontWeight: 950, textDecoration: "underline" },
+
+  alert: {
+    marginTop: 14,
+    padding: 12,
+    borderRadius: 12,
+    background: "#1a0f0f",
+    border: "1px solid #5a1f1f",
+    color: "#ffd6d6",
+    fontWeight: 900,
   },
 };
