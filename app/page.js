@@ -298,7 +298,7 @@ export default function HomePage() {
         </div>
       </footer>
 
-      <style jsx>{`
+      <style js>{`
         .page {
           min-height: 100vh;
           color: #fff;
