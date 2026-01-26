@@ -1,80 +1,27 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { supabase } from "@/lib/supabaseClient";
+import { useParams } from "next/navigation";
+import { supabase } from "../../../../lib/supabaseClient";
 
-type ContactRow = {
-  id: string;
-  user_id: string;
-  first_name: string | null;
-  last_name: string | null;
-  email: string | null;
-  phone: string | null;
-  created_at: string | null;
-};
-
-type DealRow = {
-  id: string;
-  user_id: string;
-  contact_id: string | null;
-  title: string;
-  status: string | null;
-  value: number | null;
-  created_at: string | null;
-};
-
-type NoteRow = {
-  id: string;
-  user_id: string;
-  contact_id: string | null;
-  deal_id: string | null;
-  body: string;
-  created_at: string | null;
-};
-
-type TaskRow = {
-  id: string;
-  user_id: string;
-  contact_id: string | null;
-  deal_id: string | null;
-  title: string;
-  description: string | null;
-  due_at: string | null;
-  completed: boolean;
-  created_at: string;
-};
-
-type CalendarRow = {
-  id: string;
-  user_id: string;
-  contact_id: string | null;
-  deal_id: string | null;
-  title: string;
-  location: string | null;
-  start_at: string;
-  end_at: string;
-  notes: string | null;
-  created_at: string;
-  updated_at: string;
-};
-
-export default function ContactProfilePage({ params }: { params: { id: string } }) {
-  const contactId = params.id;
+export default function ContactProfilePage() {
+  const params = useParams();
+  const contactId = params?.id;
 
   const [loading, setLoading] = useState(true);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [errorMsg, setErrorMsg] = useState(null);
 
-  const [contact, setContact] = useState<ContactRow | null>(null);
-  const [deals, setDeals] = useState<DealRow[]>([]);
-  const [notes, setNotes] = useState<NoteRow[]>([]);
-  const [tasks, setTasks] = useState<TaskRow[]>([]);
-  const [events, setEvents] = useState<CalendarRow[]>([]);
+  const [contact, setContact] = useState(null);
+  const [deals, setDeals] = useState([]);
+  const [notes, setNotes] = useState([]);
+  const [tasks, setTasks] = useState([]);
+  const [events, setEvents] = useState([]);
 
-  // add task form
+  // Add task
   const [taskTitle, setTaskTitle] = useState("");
   const [taskDueAt, setTaskDueAt] = useState("");
 
-  // add event form
+  // Add event
   const [eventTitle, setEventTitle] = useState("");
   const [eventStart, setEventStart] = useState("");
   const [eventEnd, setEventEnd] = useState("");
@@ -82,22 +29,24 @@ export default function ContactProfilePage({ params }: { params: { id: string } 
   const taskDueIso = useMemo(() => {
     if (!taskDueAt) return null;
     const d = new Date(taskDueAt);
-    return isNaN(d.getTime()) ? null : d.toISOString();
+    return Number.isNaN(d.getTime()) ? null : d.toISOString();
   }, [taskDueAt]);
 
   const eventStartIso = useMemo(() => {
     if (!eventStart) return null;
     const d = new Date(eventStart);
-    return isNaN(d.getTime()) ? null : d.toISOString();
+    return Number.isNaN(d.getTime()) ? null : d.toISOString();
   }, [eventStart]);
 
   const eventEndIso = useMemo(() => {
     if (!eventEnd) return null;
     const d = new Date(eventEnd);
-    return isNaN(d.getTime()) ? null : d.toISOString();
+    return Number.isNaN(d.getTime()) ? null : d.toISOString();
   }, [eventEnd]);
 
   async function loadAll() {
+    if (!contactId) return;
+
     setLoading(true);
     setErrorMsg(null);
 
@@ -108,6 +57,8 @@ export default function ContactProfilePage({ params }: { params: { id: string } 
       supabase.from("tasks").select("*").eq("contact_id", contactId).order("created_at", { ascending: false }),
       supabase.from("calendar_events").select("*").eq("contact_id", contactId).order("start_at", { ascending: true }),
     ]);
+
+    console.log("loadAll", { cRes, dRes, nRes, tRes, eRes });
 
     if (cRes.error) {
       setErrorMsg(cRes.error.message);
@@ -120,17 +71,14 @@ export default function ContactProfilePage({ params }: { params: { id: string } 
       return;
     }
 
-    // if any other query fails, still show contact but surface error
-    const err =
-      dRes.error?.message || nRes.error?.message || tRes.error?.message || eRes.error?.message || null;
-
+    const err = dRes.error?.message || nRes.error?.message || tRes.error?.message || eRes.error?.message || null;
     setErrorMsg(err);
 
-    setContact(cRes.data as ContactRow);
-    setDeals((dRes.data ?? []) as DealRow[]);
-    setNotes((nRes.data ?? []) as NoteRow[]);
-    setTasks((tRes.data ?? []) as TaskRow[]);
-    setEvents((eRes.data ?? []) as CalendarRow[]);
+    setContact(cRes.data || null);
+    setDeals(dRes.data || []);
+    setNotes(nRes.data || []);
+    setTasks(tRes.data || []);
+    setEvents(eRes.data || []);
 
     setLoading(false);
   }
@@ -140,11 +88,11 @@ export default function ContactProfilePage({ params }: { params: { id: string } 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [contactId]);
 
-  async function addTaskLinkedToContact() {
+  async function addTaskLinked() {
     setErrorMsg(null);
 
     const payload = {
-      title: taskTitle.trim(),
+      title: (taskTitle || "").trim(),
       due_at: taskDueIso,
       contact_id: contactId,
       deal_id: null,
@@ -155,25 +103,20 @@ export default function ContactProfilePage({ params }: { params: { id: string } 
       return;
     }
 
-    const { data, error } = await supabase
-      .from("tasks")
-      .insert(payload)
-      .select()
-      .single();
-
-    console.log("addTaskLinkedToContact result", { data, error });
+    const { data, error } = await supabase.from("tasks").insert(payload).select().single();
+    console.log("addTaskLinked", { payload, data, error });
 
     if (error) {
       setErrorMsg(error.message);
       return;
     }
 
-    setTasks((prev) => [data as TaskRow, ...prev]);
+    setTasks((prev) => [data, ...prev]);
     setTaskTitle("");
     setTaskDueAt("");
   }
 
-  async function toggleTask(task: TaskRow) {
+  async function toggleTask(task) {
     setErrorMsg(null);
 
     const { data, error } = await supabase
@@ -183,21 +126,21 @@ export default function ContactProfilePage({ params }: { params: { id: string } 
       .select()
       .single();
 
-    console.log("toggleTask result", { data, error });
+    console.log("toggleTask", { data, error });
 
     if (error) {
       setErrorMsg(error.message);
       return;
     }
 
-    setTasks((prev) => prev.map((t) => (t.id === task.id ? (data as TaskRow) : t)));
+    setTasks((prev) => prev.map((t) => (t.id === task.id ? data : t)));
   }
 
-  async function addEventLinkedToContact() {
+  async function addEventLinked() {
     setErrorMsg(null);
 
     const payload = {
-      title: eventTitle.trim(),
+      title: (eventTitle || "").trim(),
       start_at: eventStartIso,
       end_at: eventEndIso,
       contact_id: contactId,
@@ -219,28 +162,21 @@ export default function ContactProfilePage({ params }: { params: { id: string } 
       return;
     }
 
-    const { data, error } = await supabase
-      .from("calendar_events")
-      .insert(payload)
-      .select()
-      .single();
-
-    console.log("addEventLinkedToContact result", { data, error });
+    const { data, error } = await supabase.from("calendar_events").insert(payload).select().single();
+    console.log("addEventLinked", { payload, data, error });
 
     if (error) {
       setErrorMsg(error.message);
       return;
     }
 
-    setEvents((prev) => [...prev, data as CalendarRow].sort((a, b) => a.start_at.localeCompare(b.start_at)));
+    setEvents((prev) => [...prev, data].sort((a, b) => String(a.start_at).localeCompare(String(b.start_at))));
     setEventTitle("");
     setEventStart("");
     setEventEnd("");
   }
 
-  if (loading) {
-    return <div className="p-6 text-sm text-gray-500">Loading contact...</div>;
-  }
+  if (loading) return <div className="p-6 text-sm text-gray-500">Loading...</div>;
 
   if (!contact) {
     return (
@@ -251,8 +187,7 @@ export default function ContactProfilePage({ params }: { params: { id: string } 
     );
   }
 
-  const name =
-    [contact.first_name, contact.last_name].filter(Boolean).join(" ").trim() || "Unnamed Contact";
+  const name = [contact.first_name, contact.last_name].filter(Boolean).join(" ").trim() || "Unnamed Contact";
 
   return (
     <div className="p-6 max-w-6xl mx-auto space-y-6">
@@ -261,20 +196,17 @@ export default function ContactProfilePage({ params }: { params: { id: string } 
           <div>
             <h1 className="text-2xl font-semibold">{name}</h1>
             <div className="text-sm text-gray-600 mt-1">
-              {contact.email ?? "—"} • {contact.phone ?? "—"}
+              {contact.email || "—"} • {contact.phone || "—"}
             </div>
             <div className="text-xs text-gray-400 mt-2">Contact ID: {contact.id}</div>
           </div>
-
           <button onClick={loadAll} className="px-3 py-2 rounded-lg border text-sm hover:bg-gray-50">
             Refresh
           </button>
         </div>
 
         {errorMsg && (
-          <div className="mt-4 p-3 rounded-lg border border-red-200 bg-red-50 text-red-800 text-sm">
-            {errorMsg}
-          </div>
+          <div className="mt-4 p-3 rounded-lg border border-red-200 bg-red-50 text-red-800 text-sm">{errorMsg}</div>
         )}
       </div>
 
@@ -290,7 +222,7 @@ export default function ContactProfilePage({ params }: { params: { id: string } 
               <div key={d.id} className="p-4">
                 <div className="font-medium">{d.title}</div>
                 <div className="text-xs text-gray-500 mt-1">
-                  Status: {d.status ?? "—"} • Value: {d.value ?? 0}
+                  Status: {d.status || "—"} • Value: {d.value ?? 0}
                 </div>
               </div>
             ))}
@@ -342,10 +274,7 @@ export default function ContactProfilePage({ params }: { params: { id: string } 
                   onChange={(e) => setTaskDueAt(e.target.value)}
                 />
               </div>
-              <button
-                onClick={addTaskLinkedToContact}
-                className="px-4 py-2 rounded-lg bg-black text-white text-sm"
-              >
+              <button onClick={addTaskLinked} className="px-4 py-2 rounded-lg bg-black text-white text-sm">
                 Add
               </button>
             </div>
@@ -356,7 +285,7 @@ export default function ContactProfilePage({ params }: { params: { id: string } 
               <div key={t.id} className="p-4 flex items-start justify-between gap-4">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
-                    <input type="checkbox" checked={t.completed} onChange={() => toggleTask(t)} />
+                    <input type="checkbox" checked={!!t.completed} onChange={() => toggleTask(t)} />
                     <div className={`font-medium truncate ${t.completed ? "line-through text-gray-500" : ""}`}>
                       {t.title}
                     </div>
@@ -371,7 +300,7 @@ export default function ContactProfilePage({ params }: { params: { id: string } 
           </div>
         </div>
 
-        {/* Calendar Events */}
+        {/* Calendar */}
         <div className="rounded-2xl border">
           <div className="p-4 border-b flex items-center justify-between">
             <div className="font-medium">Calendar</div>
@@ -408,10 +337,7 @@ export default function ContactProfilePage({ params }: { params: { id: string } 
                 />
               </div>
 
-              <button
-                onClick={addEventLinkedToContact}
-                className="px-4 py-2 rounded-lg bg-black text-white text-sm"
-              >
+              <button onClick={addEventLinked} className="px-4 py-2 rounded-lg bg-black text-white text-sm">
                 Add
               </button>
             </div>

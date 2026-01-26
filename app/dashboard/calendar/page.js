@@ -1,28 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { supabase } from "@/lib/supabaseClient";
-
-type CalendarRow = {
-  id: string;
-  user_id: string;
-  contact_id: string | null;
-  deal_id: string | null;
-  title: string;
-  location: string | null;
-  start_at: string;
-  end_at: string;
-  notes: string | null;
-  created_at: string;
-  updated_at: string;
-};
+import { supabase } from "../../../lib/supabaseClient";
 
 export default function CalendarPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [errorMsg, setErrorMsg] = useState(null);
 
-  const [events, setEvents] = useState<CalendarRow[]>([]);
+  const [events, setEvents] = useState([]);
 
   const [title, setTitle] = useState("");
   const [location, setLocation] = useState("");
@@ -33,13 +19,13 @@ export default function CalendarPage() {
   const startAtIso = useMemo(() => {
     if (!startAt) return null;
     const d = new Date(startAt);
-    return isNaN(d.getTime()) ? null : d.toISOString();
+    return Number.isNaN(d.getTime()) ? null : d.toISOString();
   }, [startAt]);
 
   const endAtIso = useMemo(() => {
     if (!endAt) return null;
     const d = new Date(endAt);
-    return isNaN(d.getTime()) ? null : d.toISOString();
+    return Number.isNaN(d.getTime()) ? null : d.toISOString();
   }, [endAt]);
 
   async function loadEvents() {
@@ -52,6 +38,8 @@ export default function CalendarPage() {
       .order("start_at", { ascending: true })
       .limit(200);
 
+    console.log("loadEvents", { data, error });
+
     if (error) {
       setErrorMsg(error.message);
       setEvents([]);
@@ -59,7 +47,7 @@ export default function CalendarPage() {
       return;
     }
 
-    setEvents((data ?? []) as CalendarRow[]);
+    setEvents(data || []);
     setLoading(false);
   }
 
@@ -79,7 +67,7 @@ export default function CalendarPage() {
       end_at: endAtIso,
       contact_id: null,
       deal_id: null,
-      // IMPORTANT: do NOT send user_id from client
+      // IMPORTANT: do NOT pass user_id from client
     };
 
     if (!payload.title) {
@@ -88,7 +76,7 @@ export default function CalendarPage() {
       return;
     }
     if (!payload.start_at || !payload.end_at) {
-      setErrorMsg("Start and end times are required.");
+      setErrorMsg("Start and end are required.");
       setSaving(false);
       return;
     }
@@ -98,13 +86,9 @@ export default function CalendarPage() {
       return;
     }
 
-    const { data, error } = await supabase
-      .from("calendar_events")
-      .insert(payload)
-      .select()
-      .single();
+    const { data, error } = await supabase.from("calendar_events").insert(payload).select().single();
 
-    console.log("addEvent result", { data, error });
+    console.log("addEvent", { payload, data, error });
 
     if (error) {
       setErrorMsg(error.message);
@@ -112,7 +96,7 @@ export default function CalendarPage() {
       return;
     }
 
-    setEvents((prev) => [...prev, data as CalendarRow].sort((a, b) => a.start_at.localeCompare(b.start_at)));
+    setEvents((prev) => [...prev, data].sort((a, b) => String(a.start_at).localeCompare(String(b.start_at))));
     setTitle("");
     setLocation("");
     setNotes("");
@@ -121,12 +105,12 @@ export default function CalendarPage() {
     setSaving(false);
   }
 
-  async function deleteEvent(id: string) {
+  async function deleteEvent(id) {
     setErrorMsg(null);
 
     const { error } = await supabase.from("calendar_events").delete().eq("id", id);
 
-    console.log("deleteEvent result", { error });
+    console.log("deleteEvent", { error });
 
     if (error) {
       setErrorMsg(error.message);
@@ -142,9 +126,10 @@ export default function CalendarPage() {
         <div>
           <h1 className="text-2xl font-semibold">Calendar</h1>
           <p className="text-sm text-gray-500">
-            Events are saved in Supabase table: <b>calendar_events</b>.
+            Saves to Supabase table: <b>calendar_events</b>
           </p>
         </div>
+
         <button
           onClick={loadEvents}
           className="px-3 py-2 rounded-lg border text-sm hover:bg-gray-50"
@@ -187,7 +172,7 @@ export default function CalendarPage() {
 
         <div className="flex flex-wrap items-end gap-3">
           <div className="flex flex-col">
-            <label className="text-xs text-gray-500 mb-1">Start (required)</label>
+            <label className="text-xs text-gray-500 mb-1">Start</label>
             <input
               type="datetime-local"
               className="border rounded-lg px-3 py-2"
@@ -197,7 +182,7 @@ export default function CalendarPage() {
           </div>
 
           <div className="flex flex-col">
-            <label className="text-xs text-gray-500 mb-1">End (required)</label>
+            <label className="text-xs text-gray-500 mb-1">End</label>
             <input
               type="datetime-local"
               className="border rounded-lg px-3 py-2"
@@ -234,18 +219,13 @@ export default function CalendarPage() {
                 {e.notes && <div className="text-sm text-gray-600 mt-2">{e.notes}</div>}
               </div>
 
-              <button
-                onClick={() => deleteEvent(e.id)}
-                className="px-3 py-2 rounded-lg border text-sm hover:bg-gray-50"
-              >
+              <button onClick={() => deleteEvent(e.id)} className="px-3 py-2 rounded-lg border text-sm hover:bg-gray-50">
                 Delete
               </button>
             </div>
           ))}
 
-          {!loading && events.length === 0 && (
-            <div className="p-6 text-sm text-gray-500">No events yet.</div>
-          )}
+          {!loading && events.length === 0 && <div className="p-6 text-sm text-gray-500">No events yet.</div>}
         </div>
       </div>
     </div>
