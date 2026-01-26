@@ -19,13 +19,19 @@ export default function ContactProfilePage() {
   const [rtStatus, setRtStatus] = useState("connecting");
 
   const [contact, setContact] = useState(null);
+
   const [deals, setDeals] = useState([]);
   const [notes, setNotes] = useState([]);
   const [tasks, setTasks] = useState([]);
   const [events, setEvents] = useState([]);
 
+  const [showOnlyActiveDeal, setShowOnlyActiveDeal] = useState(false);
+
   // Forms
-  const [noteBody, setNoteBody] = useState("");
+  const [noteForm, setNoteForm] = useState({
+    deal_id: "",
+    body: "",
+  });
 
   const [dealForm, setDealForm] = useState({
     title: "",
@@ -34,12 +40,14 @@ export default function ContactProfilePage() {
   });
 
   const [taskForm, setTaskForm] = useState({
+    deal_id: "",
     title: "",
     description: "",
     due_at: "",
   });
 
   const [eventForm, setEventForm] = useState({
+    deal_id: "",
     title: "",
     location: "",
     start_at: "",
@@ -56,6 +64,36 @@ export default function ContactProfilePage() {
     return data.session;
   }
 
+  function getActiveDealId() {
+    return contact?.active_deal_id || "";
+  }
+
+  function getDealNameById(id) {
+    const d = deals.find((x) => x.id === id);
+    return d?.title || "—";
+  }
+
+  function filteredByDeal(list, dealId) {
+    if (!dealId) return list;
+    return list.filter((x) => x.deal_id === dealId);
+  }
+
+  const activeDealId = getActiveDealId();
+
+  const visibleNotes = showOnlyActiveDeal ? filteredByDeal(notes, activeDealId) : notes;
+  const visibleTasks = showOnlyActiveDeal ? filteredByDeal(tasks, activeDealId) : tasks;
+  const visibleEvents = showOnlyActiveDeal ? filteredByDeal(events, activeDealId) : events;
+
+  const openTasksCount = tasks.filter((t) => !t.completed).length;
+  const nextEvent = [...events]
+    .filter((e) => e?.start_at)
+    .sort((a, b) => String(a.start_at).localeCompare(String(b.start_at)))[0];
+
+  const totalDealValue = deals.reduce((sum, d) => {
+    const v = Number(d?.value ?? 0);
+    return sum + (Number.isFinite(v) ? v : 0);
+  }, 0);
+
   async function loadAll() {
     if (!contactId) return;
 
@@ -67,7 +105,11 @@ export default function ContactProfilePage() {
       if (!session) return;
 
       const [cRes, dRes, nRes, tRes, eRes] = await Promise.all([
-        sb.from("contacts").select("*").eq("id", contactId).single(),
+        sb
+          .from("contacts")
+          .select("id, first_name, last_name, email, phone, created_at, user_id, active_deal_id")
+          .eq("id", contactId)
+          .single(),
         sb.from("deals").select("*").eq("contact_id", contactId).order("created_at", { ascending: false }),
         sb.from("notes").select("*").eq("contact_id", contactId).order("created_at", { ascending: false }),
         sb.from("tasks").select("*").eq("contact_id", contactId).order("created_at", { ascending: false }),
@@ -78,7 +120,6 @@ export default function ContactProfilePage() {
 
       if (cRes.error) throw cRes.error;
 
-      // show first non-contact error (if any)
       const otherErr =
         dRes.error?.message || nRes.error?.message || tRes.error?.message || eRes.error?.message || "";
       if (otherErr) setErr(otherErr);
@@ -88,6 +129,12 @@ export default function ContactProfilePage() {
       setNotes(nRes.data || []);
       setTasks(tRes.data || []);
       setEvents(eRes.data || []);
+
+      // keep forms in sync with active deal (only if user hasn't chosen a deal manually yet)
+      const a = cRes.data?.active_deal_id || "";
+      setNoteForm((p) => (p.deal_id ? p : { ...p, deal_id: a }));
+      setTaskForm((p) => (p.deal_id ? p : { ...p, deal_id: a }));
+      setEventForm((p) => (p.deal_id ? p : { ...p, deal_id: a }));
     } catch (e) {
       console.error(e);
       setErr(e?.message || "Failed to load contact");
@@ -137,12 +184,41 @@ export default function ContactProfilePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [contactId]);
 
-  // Actions
+  async function setActiveDeal(dealIdOrNull) {
+    setErr("");
+    try {
+      const session = await requireSession();
+      if (!session) return;
+
+      const payload = { active_deal_id: dealIdOrNull || null };
+
+      const { data, error } = await sb
+        .from("contacts")
+        .update(payload)
+        .eq("id", contactId)
+        .select("id, active_deal_id")
+        .single();
+
+      if (error) throw error;
+
+      setContact((p) => ({ ...p, active_deal_id: data.active_deal_id }));
+
+      // default forms to active deal
+      const nextDeal = data.active_deal_id || "";
+      setNoteForm((p) => ({ ...p, deal_id: nextDeal }));
+      setTaskForm((p) => ({ ...p, deal_id: nextDeal }));
+      setEventForm((p) => ({ ...p, deal_id: nextDeal }));
+    } catch (e) {
+      console.error(e);
+      setErr(e?.message || "Failed to set active deal");
+    }
+  }
+
   async function addNote(e) {
     e.preventDefault();
     setErr("");
 
-    const body = (noteBody || "").trim();
+    const body = (noteForm.body || "").trim();
     if (!body) return setErr("Note can’t be empty.");
 
     setSaving(true);
@@ -150,18 +226,20 @@ export default function ContactProfilePage() {
       const session = await requireSession();
       if (!session) return;
 
+      const dealId = noteForm.deal_id ? noteForm.deal_id : null;
+
       const payload = {
         user_id: session.user.id,
         contact_id: contactId,
+        deal_id: dealId,
         body,
-        deal_id: null,
       };
 
       const { data, error } = await sb.from("notes").insert([payload]).select("*").single();
       if (error) throw error;
 
       setNotes((prev) => [data, ...prev]);
-      setNoteBody("");
+      setNoteForm((p) => ({ ...p, body: "" }));
     } catch (e2) {
       console.error(e2);
       setErr(e2?.message || "Failed to add note");
@@ -218,6 +296,11 @@ export default function ContactProfilePage() {
 
       setDeals((prev) => [data, ...prev]);
       setDealForm({ title: "", status: "lead", value: "" });
+
+      // If no active deal yet, auto-set this as active (big UX win)
+      if (!activeDealId) {
+        await setActiveDeal(data.id);
+      }
     } catch (e2) {
       console.error(e2);
       setErr(e2?.message || "Failed to add deal");
@@ -241,10 +324,12 @@ export default function ContactProfilePage() {
       const session = await requireSession();
       if (!session) return;
 
+      const dealId = taskForm.deal_id ? taskForm.deal_id : null;
+
       const payload = {
         user_id: session.user.id,
         contact_id: contactId,
-        deal_id: null,
+        deal_id: dealId,
         title,
         description: taskForm.description.trim() ? taskForm.description.trim() : null,
         due_at: dueIso,
@@ -255,7 +340,7 @@ export default function ContactProfilePage() {
       if (error) throw error;
 
       setTasks((prev) => [data, ...prev]);
-      setTaskForm({ title: "", description: "", due_at: "" });
+      setTaskForm((p) => ({ ...p, title: "", description: "", due_at: "" }));
     } catch (e2) {
       console.error(e2);
       setErr(e2?.message || "Failed to add task");
@@ -311,7 +396,6 @@ export default function ContactProfilePage() {
 
     const title = (eventForm.title || "").trim();
     if (!title) return setErr("Event title can’t be empty.");
-
     if (!eventForm.start_at || !eventForm.end_at) return setErr("Start and end are required.");
 
     const start = new Date(eventForm.start_at);
@@ -325,10 +409,12 @@ export default function ContactProfilePage() {
       const session = await requireSession();
       if (!session) return;
 
+      const dealId = eventForm.deal_id ? eventForm.deal_id : null;
+
       const payload = {
         user_id: session.user.id,
         contact_id: contactId,
-        deal_id: null,
+        deal_id: dealId,
         title,
         location: eventForm.location.trim() ? eventForm.location.trim() : null,
         start_at: start.toISOString(),
@@ -345,7 +431,7 @@ export default function ContactProfilePage() {
         return next;
       });
 
-      setEventForm({ title: "", location: "", start_at: "", end_at: "", notes: "" });
+      setEventForm((p) => ({ ...p, title: "", location: "", start_at: "", end_at: "", notes: "" }));
     } catch (e2) {
       console.error(e2);
       setErr(e2?.message || "Failed to add event");
@@ -373,13 +459,6 @@ export default function ContactProfilePage() {
     }
   }
 
-  // UI helpers
-  const name =
-    contact ? [contact.first_name, contact.last_name].filter(Boolean).join(" ").trim() || "Unnamed Contact" : "";
-
-  const email = contact?.email || "—";
-  const phone = contact?.phone || "—";
-
   if (loading) return <div style={{ opacity: 0.75 }}>Loading…</div>;
 
   if (!contact) {
@@ -403,6 +482,10 @@ export default function ContactProfilePage() {
     );
   }
 
+  const name = [contact.first_name, contact.last_name].filter(Boolean).join(" ").trim() || "Unnamed Contact";
+  const email = contact.email || "—";
+  const phone = contact.phone || "—";
+
   return (
     <div>
       {/* Header */}
@@ -412,8 +495,19 @@ export default function ContactProfilePage() {
           <p style={styles.sub}>
             Activity log • Realtime: <span style={styles.badge}>{rtStatus}</span>
           </p>
+
           <div style={{ marginTop: 8, opacity: 0.8, fontSize: 13 }}>
             {email} • {phone}
+          </div>
+
+          {/* Quick stats */}
+          <div style={{ marginTop: 10, display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <span style={styles.pill}>Open tasks: {openTasksCount}</span>
+            <span style={styles.pill}>Deals: {deals.length}</span>
+            <span style={styles.pill}>Total value: {totalDealValue}</span>
+            <span style={styles.pill}>
+              Next event: {nextEvent?.start_at ? new Date(nextEvent.start_at).toLocaleString() : "—"}
+            </span>
           </div>
         </div>
 
@@ -430,8 +524,8 @@ export default function ContactProfilePage() {
 
       {err ? <div style={styles.alert}>{err}</div> : null}
 
-      {/* Quick actions */}
-      <div style={{ marginTop: 14, display: "flex", gap: 10, flexWrap: "wrap" }}>
+      {/* Active deal controls */}
+      <div style={{ marginTop: 14, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
         <button
           style={styles.btnGhost}
           onClick={() => navigator.clipboard.writeText(email === "—" ? "" : String(email))}
@@ -446,54 +540,33 @@ export default function ContactProfilePage() {
         >
           Copy Phone
         </button>
-        <div style={{ opacity: 0.6, fontSize: 12, alignSelf: "center" }}>
-          Contact ID: <span style={{ opacity: 0.95, fontWeight: 900 }}>{contact.id}</span>
-        </div>
+
+        <span style={{ opacity: 0.65, fontSize: 12 }}>
+          Active deal:{" "}
+          <span style={{ fontWeight: 950, opacity: 0.95 }}>
+            {activeDealId ? getDealNameById(activeDealId) : "None"}
+          </span>
+        </span>
+
+        <button
+          style={styles.btnGhost}
+          onClick={() => setShowOnlyActiveDeal((p) => !p)}
+          type="button"
+          disabled={!activeDealId}
+          title={!activeDealId ? "Set an active deal first" : ""}
+        >
+          {showOnlyActiveDeal ? "Showing: Active Deal Only" : "Showing: All Deals"}
+        </button>
+
+        {activeDealId ? (
+          <button style={styles.btnGhost} onClick={() => setActiveDeal(null)} type="button">
+            Clear Active Deal
+          </button>
+        ) : null}
       </div>
 
-      {/* Layout */}
+      {/* Main */}
       <div style={{ marginTop: 18, display: "grid", gridTemplateColumns: "1fr", gap: 14 }}>
-        {/* Notes */}
-        <div style={styles.card}>
-          <div style={styles.cardHeader}>
-            <h2 style={styles.h2}>Notes ({notes.length})</h2>
-          </div>
-
-          <form onSubmit={addNote} style={styles.form}>
-            <textarea
-              value={noteBody}
-              onChange={(e) => setNoteBody(e.target.value)}
-              placeholder="Write a note..."
-              style={styles.textarea}
-              rows={3}
-            />
-            <button type="submit" disabled={saving} style={styles.btnPrimary}>
-              {saving ? "Saving..." : "Add Note"}
-            </button>
-          </form>
-
-          {notes.length === 0 ? (
-            <div style={{ opacity: 0.75, marginTop: 10 }}>No notes yet.</div>
-          ) : (
-            <div style={{ display: "grid", gap: 10, marginTop: 10 }}>
-              {notes.map((n) => (
-                <div key={n.id} style={styles.item}>
-                  <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.5 }}>{n.body}</div>
-
-                  <div style={styles.itemMeta}>
-                    <div style={{ opacity: 0.75 }}>
-                      {n.created_at ? new Date(n.created_at).toLocaleString() : "—"}
-                    </div>
-                    <button onClick={() => deleteNote(n.id)} style={styles.btnDanger} type="button">
-                      Delete
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
         {/* Deals */}
         <div style={styles.card}>
           <div style={styles.cardHeader}>
@@ -540,19 +613,88 @@ export default function ContactProfilePage() {
             <div style={{ display: "grid", gap: 10, marginTop: 10 }}>
               {deals.map((d) => (
                 <div key={d.id} style={styles.item}>
-                  <div style={{ fontWeight: 950 }}>{d.title}</div>
-                  <div style={styles.itemMeta}>
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
-                      <div>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" }}>
+                    <div style={{ display: "grid", gap: 6 }}>
+                      <div style={{ fontWeight: 950 }}>{d.title}</div>
+                      <div style={{ opacity: 0.85, fontSize: 13 }}>
                         <span style={{ opacity: 0.75 }}>Status:</span>{" "}
-                        <span style={{ fontWeight: 900 }}>{d.status || "—"}</span>
-                      </div>
-                      <div>
-                        <span style={{ opacity: 0.75 }}>Value:</span>{" "}
+                        <span style={{ fontWeight: 900 }}>{d.status || "—"}</span>{" "}
+                        <span style={{ opacity: 0.75 }}>• Value:</span>{" "}
                         <span style={{ fontWeight: 900 }}>{d.value ?? 0}</span>
                       </div>
+                      <div style={{ opacity: 0.7, fontSize: 12 }}>
+                        Created: {d.created_at ? new Date(d.created_at).toLocaleString() : "—"}
+                      </div>
                     </div>
-                    <div style={{ opacity: 0.75 }}>{d.created_at ? new Date(d.created_at).toLocaleString() : "—"}</div>
+
+                    <button
+                      type="button"
+                      onClick={() => setActiveDeal(d.id)}
+                      style={d.id === activeDealId ? styles.btnPrimarySmall : styles.btnGhost}
+                      title="Save as active deal on this contact"
+                    >
+                      {d.id === activeDealId ? "Active ✅" : "Set Active"}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Notes */}
+        <div style={styles.card}>
+          <div style={styles.cardHeader}>
+            <h2 style={styles.h2}>Notes ({visibleNotes.length}{showOnlyActiveDeal && activeDealId ? " filtered" : ""})</h2>
+          </div>
+
+          <form onSubmit={addNote} style={styles.form}>
+            <select
+              value={noteForm.deal_id}
+              onChange={(e) => setNoteForm((p) => ({ ...p, deal_id: e.target.value }))}
+              style={styles.select}
+            >
+              <option value="">No deal (optional)</option>
+              {deals.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.title}
+                </option>
+              ))}
+            </select>
+
+            <textarea
+              value={noteForm.body}
+              onChange={(e) => setNoteForm((p) => ({ ...p, body: e.target.value }))}
+              placeholder="Write a note..."
+              style={styles.textarea}
+              rows={3}
+            />
+
+            <button type="submit" disabled={saving} style={styles.btnPrimary}>
+              {saving ? "Saving..." : "Add Note"}
+            </button>
+          </form>
+
+          {visibleNotes.length === 0 ? (
+            <div style={{ opacity: 0.75, marginTop: 10 }}>No notes yet.</div>
+          ) : (
+            <div style={{ display: "grid", gap: 10, marginTop: 10 }}>
+              {visibleNotes.map((n) => (
+                <div key={n.id} style={styles.item}>
+                  <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.5 }}>{n.body}</div>
+                  <div style={styles.itemMeta}>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+                      <div style={{ opacity: 0.75 }}>
+                        {n.created_at ? new Date(n.created_at).toLocaleString() : "—"}
+                      </div>
+                      <div style={{ opacity: 0.9 }}>
+                        <span style={{ opacity: 0.75 }}>Deal:</span>{" "}
+                        <span style={{ fontWeight: 900 }}>{n.deal_id ? getDealNameById(n.deal_id) : "—"}</span>
+                      </div>
+                    </div>
+                    <button onClick={() => deleteNote(n.id)} style={styles.btnDanger} type="button">
+                      Delete
+                    </button>
                   </div>
                 </div>
               ))}
@@ -563,16 +705,30 @@ export default function ContactProfilePage() {
         {/* Tasks */}
         <div style={styles.card}>
           <div style={styles.cardHeader}>
-            <h2 style={styles.h2}>Tasks ({tasks.length})</h2>
+            <h2 style={styles.h2}>Tasks ({visibleTasks.length}{showOnlyActiveDeal && activeDealId ? " filtered" : ""})</h2>
           </div>
 
           <form onSubmit={addTask} style={styles.form}>
+            <select
+              value={taskForm.deal_id}
+              onChange={(e) => setTaskForm((p) => ({ ...p, deal_id: e.target.value }))}
+              style={styles.select}
+            >
+              <option value="">No deal (optional)</option>
+              {deals.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.title}
+                </option>
+              ))}
+            </select>
+
             <input
               value={taskForm.title}
               onChange={(e) => setTaskForm((p) => ({ ...p, title: e.target.value }))}
               placeholder="Task title..."
               style={styles.input}
             />
+
             <textarea
               value={taskForm.description}
               onChange={(e) => setTaskForm((p) => ({ ...p, description: e.target.value }))}
@@ -593,11 +749,11 @@ export default function ContactProfilePage() {
             </button>
           </form>
 
-          {tasks.length === 0 ? (
+          {visibleTasks.length === 0 ? (
             <div style={{ opacity: 0.75, marginTop: 10 }}>No tasks yet.</div>
           ) : (
             <div style={{ display: "grid", gap: 10, marginTop: 10 }}>
-              {tasks.map((t) => (
+              {visibleTasks.map((t) => (
                 <div key={t.id} style={styles.item}>
                   <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
                     <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
@@ -631,12 +787,19 @@ export default function ContactProfilePage() {
                   </div>
 
                   <div style={styles.itemMeta}>
-                    <div>
-                      <span style={{ opacity: 0.75 }}>Due:</span>{" "}
-                      <span style={{ fontWeight: 900 }}>
-                        {t.due_at ? new Date(t.due_at).toLocaleString() : "—"}
-                      </span>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+                      <div>
+                        <span style={{ opacity: 0.75 }}>Due:</span>{" "}
+                        <span style={{ fontWeight: 900 }}>
+                          {t.due_at ? new Date(t.due_at).toLocaleString() : "—"}
+                        </span>
+                      </div>
+                      <div>
+                        <span style={{ opacity: 0.75 }}>Deal:</span>{" "}
+                        <span style={{ fontWeight: 900 }}>{t.deal_id ? getDealNameById(t.deal_id) : "—"}</span>
+                      </div>
                     </div>
+
                     <div style={{ opacity: 0.75 }}>
                       Created: {t.created_at ? new Date(t.created_at).toLocaleString() : "—"}
                     </div>
@@ -650,10 +813,23 @@ export default function ContactProfilePage() {
         {/* Calendar */}
         <div style={styles.card}>
           <div style={styles.cardHeader}>
-            <h2 style={styles.h2}>Calendar ({events.length})</h2>
+            <h2 style={styles.h2}>Calendar ({visibleEvents.length}{showOnlyActiveDeal && activeDealId ? " filtered" : ""})</h2>
           </div>
 
           <form onSubmit={addEvent} style={styles.form}>
+            <select
+              value={eventForm.deal_id}
+              onChange={(e) => setEventForm((p) => ({ ...p, deal_id: e.target.value }))}
+              style={styles.select}
+            >
+              <option value="">No deal (optional)</option>
+              {deals.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.title}
+                </option>
+              ))}
+            </select>
+
             <input
               value={eventForm.title}
               onChange={(e) => setEventForm((p) => ({ ...p, title: e.target.value }))}
@@ -696,11 +872,11 @@ export default function ContactProfilePage() {
             </button>
           </form>
 
-          {events.length === 0 ? (
+          {visibleEvents.length === 0 ? (
             <div style={{ opacity: 0.75, marginTop: 10 }}>No events yet.</div>
           ) : (
             <div style={{ display: "grid", gap: 10, marginTop: 10 }}>
-              {events.map((ev) => (
+              {visibleEvents.map((ev) => (
                 <div key={ev.id} style={styles.item}>
                   <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
                     <div style={{ display: "grid", gap: 6 }}>
@@ -718,9 +894,16 @@ export default function ContactProfilePage() {
                   </div>
 
                   <div style={styles.itemMeta}>
-                    <div style={{ opacity: 0.75 }}>
-                      Created: {ev.created_at ? new Date(ev.created_at).toLocaleString() : "—"}
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+                      <div style={{ opacity: 0.75 }}>
+                        Created: {ev.created_at ? new Date(ev.created_at).toLocaleString() : "—"}
+                      </div>
+                      <div>
+                        <span style={{ opacity: 0.75 }}>Deal:</span>{" "}
+                        <span style={{ fontWeight: 900 }}>{ev.deal_id ? getDealNameById(ev.deal_id) : "—"}</span>
+                      </div>
                     </div>
+
                     <div style={{ opacity: 0.75 }}>
                       Updated: {ev.updated_at ? new Date(ev.updated_at).toLocaleString() : "—"}
                     </div>
@@ -750,6 +933,17 @@ const styles = {
     background: "rgba(255,255,255,0.06)",
     fontWeight: 900,
     fontSize: 12,
+  },
+
+  pill: {
+    display: "inline-block",
+    padding: "8px 12px",
+    borderRadius: 999,
+    border: "1px solid rgba(255,255,255,0.16)",
+    background: "rgba(255,255,255,0.06)",
+    fontWeight: 900,
+    fontSize: 12,
+    opacity: 0.95,
   },
 
   h2: { margin: 0, fontSize: 18, fontWeight: 900 },
@@ -832,6 +1026,18 @@ const styles = {
     fontWeight: 950,
     cursor: "pointer",
     width: "fit-content",
+  },
+
+  btnPrimarySmall: {
+    padding: "10px 12px",
+    borderRadius: 999,
+    border: "1px solid #f5f5f5",
+    background: "#f5f5f5",
+    color: "#0b0b0b",
+    fontWeight: 950,
+    cursor: "pointer",
+    height: "fit-content",
+    fontSize: 13,
   },
 
   btnDanger: {
