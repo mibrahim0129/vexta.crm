@@ -1,145 +1,236 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { supabaseBrowser } from "@/lib/supabaseBrowser";
+import { supabase } from "@/lib/supabaseClient";
+
+type TaskRow = {
+  id: string;
+  user_id: string;
+  contact_id: string | null;
+  deal_id: string | null;
+  title: string;
+  description: string | null;
+  due_at: string | null;
+  completed: boolean;
+  created_at: string;
+};
 
 export default function TasksPage() {
-  const sb = useMemo(() => supabaseBrowser(), []);
   const [loading, setLoading] = useState(true);
-  const [rows, setRows] = useState([]);
+  const [saving, setSaving] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const [tasks, setTasks] = useState<TaskRow[]>([]);
 
   const [title, setTitle] = useState("");
-  const [dueAt, setDueAt] = useState("");
-  const [contactId, setContactId] = useState("");
+  const [description, setDescription] = useState("");
+  const [dueAt, setDueAt] = useState<string>("");
 
-  async function getUserId() {
-    const { data, error } = await sb.auth.getUser();
-    if (error) throw error;
-    if (!data?.user?.id) throw new Error("Not logged in");
-    return data.user.id;
-  }
+  const dueAtIso = useMemo(() => {
+    if (!dueAt) return null;
+    // dueAt from input datetime-local, convert to ISO
+    const d = new Date(dueAt);
+    return isNaN(d.getTime()) ? null : d.toISOString();
+  }, [dueAt]);
 
-  async function run(promise, label) {
-    const { data, error } = await promise;
-    if (error) {
-      console.error(label, error);
-      alert(`${label}: ${error.message}`);
-      return { ok: false, data: null };
-    }
-    return { ok: true, data };
-  }
-
-  async function load() {
+  async function loadTasks() {
     setLoading(true);
-    try {
-      const user_id = await getUserId();
-      const res = await run(
-        sb.from("tasks").select("*").eq("user_id", user_id).order("created_at", { ascending: false }),
-        "Load tasks failed"
-      );
-      setRows(Array.isArray(res.data) ? res.data : []);
-    } catch (e) {
-      console.error(e);
-      alert(`Load tasks crashed: ${e.message}`);
-      setRows([]);
-    } finally {
+    setErrorMsg(null);
+
+    const { data, error } = await supabase
+      .from("tasks")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .limit(200);
+
+    if (error) {
+      setErrorMsg(error.message);
+      setTasks([]);
       setLoading(false);
+      return;
     }
+
+    setTasks((data ?? []) as TaskRow[]);
+    setLoading(false);
   }
 
   useEffect(() => {
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    loadTasks();
   }, []);
 
-  async function addTask(e) {
-    e.preventDefault();
-    const t = title.trim();
-    if (!t) return;
+  async function addTask() {
+    setSaving(true);
+    setErrorMsg(null);
 
-    const user_id = await getUserId();
+    const payload = {
+      title: title.trim(),
+      description: description.trim() ? description.trim() : null,
+      due_at: dueAtIso,
+      contact_id: null,
+      deal_id: null,
+      // IMPORTANT: do NOT send user_id from client
+    };
 
-    const res = await run(
-      sb.from("tasks").insert({
-        user_id,
-        title: t,
-        status: "open",
-        due_at: dueAt ? new Date(dueAt).toISOString() : null,
-        contact_id: contactId.trim() ? contactId.trim() : null,
-      }),
-      "Add task failed"
-    );
-
-    if (res.ok) {
-      setTitle("");
-      setDueAt("");
-      setContactId("");
-      await load();
+    if (!payload.title) {
+      setErrorMsg("Task title is required.");
+      setSaving(false);
+      return;
     }
+
+    const { data, error } = await supabase
+      .from("tasks")
+      .insert(payload)
+      .select()
+      .single();
+
+    console.log("addTask result", { data, error });
+
+    if (error) {
+      setErrorMsg(error.message);
+      setSaving(false);
+      return;
+    }
+
+    setTasks((prev) => [data as TaskRow, ...prev]);
+    setTitle("");
+    setDescription("");
+    setDueAt("");
+    setSaving(false);
   }
 
-  async function toggle(t) {
-    const res = await run(
-      sb.from("tasks").update({ status: t.status === "done" ? "open" : "done" }).eq("id", t.id),
-      "Update task failed"
-    );
-    if (res.ok) await load();
+  async function toggleCompleted(task: TaskRow) {
+    setErrorMsg(null);
+
+    const { data, error } = await supabase
+      .from("tasks")
+      .update({ completed: !task.completed })
+      .eq("id", task.id)
+      .select()
+      .single();
+
+    console.log("toggleCompleted result", { data, error });
+
+    if (error) {
+      setErrorMsg(error.message);
+      return;
+    }
+
+    setTasks((prev) => prev.map((t) => (t.id === task.id ? (data as TaskRow) : t)));
   }
 
-  async function remove(id) {
-    const res = await run(sb.from("tasks").delete().eq("id", id), "Delete task failed");
-    if (res.ok) await load();
+  async function deleteTask(id: string) {
+    setErrorMsg(null);
+
+    const { error } = await supabase.from("tasks").delete().eq("id", id);
+
+    console.log("deleteTask result", { error });
+
+    if (error) {
+      setErrorMsg(error.message);
+      return;
+    }
+
+    setTasks((prev) => prev.filter((t) => t.id !== id));
   }
 
   return (
-    <div style={{ color: "white" }}>
-      <h1 style={{ margin: 0, fontSize: 34 }}>Tasks</h1>
-      <div style={{ opacity: 0.7, fontWeight: 800, marginTop: 6 }}>Reminders + follow-ups.</div>
-
-      <div style={card}>
-        <form onSubmit={addTask} style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr 1fr auto", gap: 10 }}>
-          <input style={input} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Task title" />
-          <input style={input} type="datetime-local" value={dueAt} onChange={(e) => setDueAt(e.target.value)} />
-          <input style={input} value={contactId} onChange={(e) => setContactId(e.target.value)} placeholder="contact_id (optional)" />
-          <button style={primary} type="submit">Add</button>
-        </form>
+    <div className="p-6 max-w-5xl mx-auto space-y-6">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold">Tasks</h1>
+          <p className="text-sm text-gray-500">Create and manage tasks (saved in Supabase table: <b>tasks</b>).</p>
+        </div>
+        <button
+          onClick={loadTasks}
+          className="px-3 py-2 rounded-lg border text-sm hover:bg-gray-50"
+          disabled={loading}
+        >
+          Refresh
+        </button>
       </div>
 
-      <div style={card}>
-        {loading ? (
-          <div style={{ opacity: 0.7, fontWeight: 800 }}>Loading…</div>
-        ) : rows.length === 0 ? (
-          <div style={{ opacity: 0.7, fontWeight: 800 }}>No tasks yet.</div>
-        ) : (
-          <div style={{ display: "grid", gap: 10 }}>
-            {rows.map((t) => (
-              <div key={t.id} style={item}>
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-                    <button type="button" onClick={() => toggle(t)} style={pill}>
-                      {t.status === "done" ? "Done" : "Open"}
-                    </button>
-                    <div style={{ fontWeight: 950, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.title}</div>
-                  </div>
-                  <div style={{ marginTop: 6, fontSize: 12, opacity: 0.75, display: "flex", gap: 8, flexWrap: "wrap" }}>
-                    <span>{t.due_at ? `Due: ${new Date(t.due_at).toLocaleString()}` : "No due date"}</span>
-                    {t.contact_id ? <span>• Contact: {t.contact_id}</span> : null}
+      {errorMsg && (
+        <div className="p-3 rounded-lg border border-red-200 bg-red-50 text-red-800 text-sm">
+          {errorMsg}
+        </div>
+      )}
+
+      <div className="rounded-2xl border p-4 space-y-3">
+        <div className="text-sm font-medium">Add Task</div>
+
+        <input
+          className="w-full border rounded-lg px-3 py-2"
+          placeholder="Task title (required)"
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+        />
+
+        <textarea
+          className="w-full border rounded-lg px-3 py-2"
+          placeholder="Description (optional)"
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          rows={3}
+        />
+
+        <div className="flex items-center gap-3">
+          <div className="flex flex-col">
+            <label className="text-xs text-gray-500 mb-1">Due date (optional)</label>
+            <input
+              type="datetime-local"
+              className="border rounded-lg px-3 py-2"
+              value={dueAt}
+              onChange={(e) => setDueAt(e.target.value)}
+            />
+          </div>
+
+          <button
+            onClick={addTask}
+            disabled={saving}
+            className="mt-5 px-4 py-2 rounded-lg bg-black text-white text-sm disabled:opacity-60"
+          >
+            {saving ? "Saving..." : "Add"}
+          </button>
+        </div>
+      </div>
+
+      <div className="rounded-2xl border">
+        <div className="p-4 border-b flex items-center justify-between">
+          <div className="font-medium">All Tasks</div>
+          <div className="text-xs text-gray-500">{loading ? "Loading..." : `${tasks.length} tasks`}</div>
+        </div>
+
+        <div className="divide-y">
+          {tasks.map((t) => (
+            <div key={t.id} className="p-4 flex items-start justify-between gap-4">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <input type="checkbox" checked={t.completed} onChange={() => toggleCompleted(t)} />
+                  <div className={`font-medium truncate ${t.completed ? "line-through text-gray-500" : ""}`}>
+                    {t.title}
                   </div>
                 </div>
-
-                <button type="button" onClick={() => remove(t.id)} style={danger}>Delete</button>
+                {t.description && <div className="text-sm text-gray-600 mt-1">{t.description}</div>}
+                <div className="text-xs text-gray-400 mt-2">
+                  Due: {t.due_at ? new Date(t.due_at).toLocaleString() : "—"} • Created:{" "}
+                  {new Date(t.created_at).toLocaleString()}
+                </div>
               </div>
-            ))}
-          </div>
-        )}
+
+              <button
+                onClick={() => deleteTask(t.id)}
+                className="px-3 py-2 rounded-lg border text-sm hover:bg-gray-50"
+              >
+                Delete
+              </button>
+            </div>
+          ))}
+
+          {!loading && tasks.length === 0 && (
+            <div className="p-6 text-sm text-gray-500">No tasks yet.</div>
+          )}
+        </div>
       </div>
     </div>
   );
 }
-
-const card = { borderRadius: 18, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.04)", padding: 14, marginTop: 14 };
-const input = { padding: "12px 12px", borderRadius: 12, border: "1px solid rgba(255,255,255,0.16)", background: "rgba(0,0,0,0.25)", color: "white", outline: "none", fontWeight: 800 };
-const primary = { padding: "12px 14px", borderRadius: 12, border: "1px solid rgba(255,255,255,0.16)", background: "white", color: "black", fontWeight: 950, cursor: "pointer" };
-const item = { display: "flex", justifyContent: "space-between", gap: 12, padding: 12, borderRadius: 14, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(0,0,0,0.25)" };
-const pill = { borderRadius: 999, padding: "6px 10px", fontWeight: 950, fontSize: 12, border: "1px solid rgba(255,255,255,0.16)", background: "rgba(255,255,255,0.08)", color: "white", cursor: "pointer" };
-const danger = { borderRadius: 12, padding: "10px 12px", border: "1px solid rgba(239,68,68,0.35)", background: "rgba(239,68,68,0.10)", color: "#fecaca", fontWeight: 950, cursor: "pointer" };

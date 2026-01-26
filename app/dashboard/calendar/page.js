@@ -1,136 +1,253 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { supabaseBrowser } from "@/lib/supabaseBrowser";
+import { supabase } from "@/lib/supabaseClient";
+
+type CalendarRow = {
+  id: string;
+  user_id: string;
+  contact_id: string | null;
+  deal_id: string | null;
+  title: string;
+  location: string | null;
+  start_at: string;
+  end_at: string;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+};
 
 export default function CalendarPage() {
-  const sb = useMemo(() => supabaseBrowser(), []);
   const [loading, setLoading] = useState(true);
-  const [rows, setRows] = useState([]);
+  const [saving, setSaving] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const [events, setEvents] = useState<CalendarRow[]>([]);
 
   const [title, setTitle] = useState("");
-  const [startsAt, setStartsAt] = useState("");
-  const [endsAt, setEndsAt] = useState("");
-  const [contactId, setContactId] = useState("");
+  const [location, setLocation] = useState("");
+  const [notes, setNotes] = useState("");
+  const [startAt, setStartAt] = useState("");
+  const [endAt, setEndAt] = useState("");
 
-  async function getUserId() {
-    const { data, error } = await sb.auth.getUser();
-    if (error) throw error;
-    if (!data?.user?.id) throw new Error("Not logged in");
-    return data.user.id;
-  }
+  const startAtIso = useMemo(() => {
+    if (!startAt) return null;
+    const d = new Date(startAt);
+    return isNaN(d.getTime()) ? null : d.toISOString();
+  }, [startAt]);
 
-  async function run(promise, label) {
-    const { data, error } = await promise;
-    if (error) {
-      console.error(label, error);
-      alert(`${label}: ${error.message}`);
-      return { ok: false, data: null };
-    }
-    return { ok: true, data };
-  }
+  const endAtIso = useMemo(() => {
+    if (!endAt) return null;
+    const d = new Date(endAt);
+    return isNaN(d.getTime()) ? null : d.toISOString();
+  }, [endAt]);
 
-  async function load() {
+  async function loadEvents() {
     setLoading(true);
-    try {
-      const user_id = await getUserId();
-      const res = await run(
-        sb.from("calendar_events").select("*").eq("user_id", user_id).order("starts_at", { ascending: true }),
-        "Load events failed"
-      );
-      setRows(Array.isArray(res.data) ? res.data : []);
-    } catch (e) {
-      console.error(e);
-      alert(`Load events crashed: ${e.message}`);
-      setRows([]);
-    } finally {
+    setErrorMsg(null);
+
+    const { data, error } = await supabase
+      .from("calendar_events")
+      .select("*")
+      .order("start_at", { ascending: true })
+      .limit(200);
+
+    if (error) {
+      setErrorMsg(error.message);
+      setEvents([]);
       setLoading(false);
+      return;
     }
+
+    setEvents((data ?? []) as CalendarRow[]);
+    setLoading(false);
   }
 
   useEffect(() => {
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    loadEvents();
   }, []);
 
-  async function addEvent(e) {
-    e.preventDefault();
-    const t = title.trim();
-    if (!t) return;
-    if (!startsAt) return alert("Pick a start time");
+  async function addEvent() {
+    setSaving(true);
+    setErrorMsg(null);
 
-    const user_id = await getUserId();
+    const payload = {
+      title: title.trim(),
+      location: location.trim() ? location.trim() : null,
+      notes: notes.trim() ? notes.trim() : null,
+      start_at: startAtIso,
+      end_at: endAtIso,
+      contact_id: null,
+      deal_id: null,
+      // IMPORTANT: do NOT send user_id from client
+    };
 
-    const res = await run(
-      sb.from("calendar_events").insert({
-        user_id,
-        title: t,
-        starts_at: new Date(startsAt).toISOString(),
-        ends_at: endsAt ? new Date(endsAt).toISOString() : null,
-        contact_id: contactId.trim() ? contactId.trim() : null,
-      }),
-      "Add event failed"
-    );
-
-    if (res.ok) {
-      setTitle("");
-      setStartsAt("");
-      setEndsAt("");
-      setContactId("");
-      await load();
+    if (!payload.title) {
+      setErrorMsg("Event title is required.");
+      setSaving(false);
+      return;
     }
+    if (!payload.start_at || !payload.end_at) {
+      setErrorMsg("Start and end times are required.");
+      setSaving(false);
+      return;
+    }
+    if (new Date(payload.end_at).getTime() < new Date(payload.start_at).getTime()) {
+      setErrorMsg("End time must be after start time.");
+      setSaving(false);
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from("calendar_events")
+      .insert(payload)
+      .select()
+      .single();
+
+    console.log("addEvent result", { data, error });
+
+    if (error) {
+      setErrorMsg(error.message);
+      setSaving(false);
+      return;
+    }
+
+    setEvents((prev) => [...prev, data as CalendarRow].sort((a, b) => a.start_at.localeCompare(b.start_at)));
+    setTitle("");
+    setLocation("");
+    setNotes("");
+    setStartAt("");
+    setEndAt("");
+    setSaving(false);
   }
 
-  async function remove(id) {
-    const res = await run(sb.from("calendar_events").delete().eq("id", id), "Delete event failed");
-    if (res.ok) await load();
+  async function deleteEvent(id: string) {
+    setErrorMsg(null);
+
+    const { error } = await supabase.from("calendar_events").delete().eq("id", id);
+
+    console.log("deleteEvent result", { error });
+
+    if (error) {
+      setErrorMsg(error.message);
+      return;
+    }
+
+    setEvents((prev) => prev.filter((e) => e.id !== id));
   }
 
   return (
-    <div style={{ color: "white" }}>
-      <h1 style={{ margin: 0, fontSize: 34 }}>Calendar</h1>
-      <div style={{ opacity: 0.7, fontWeight: 800, marginTop: 6 }}>Appointments + reminders.</div>
-
-      <div style={card}>
-        <form onSubmit={addEvent} style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr 1fr 1fr auto", gap: 10 }}>
-          <input style={input} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Event title" />
-          <input style={input} type="datetime-local" value={startsAt} onChange={(e) => setStartsAt(e.target.value)} />
-          <input style={input} type="datetime-local" value={endsAt} onChange={(e) => setEndsAt(e.target.value)} />
-          <input style={input} value={contactId} onChange={(e) => setContactId(e.target.value)} placeholder="contact_id (optional)" />
-          <button style={primary} type="submit">Add</button>
-        </form>
+    <div className="p-6 max-w-5xl mx-auto space-y-6">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold">Calendar</h1>
+          <p className="text-sm text-gray-500">
+            Events are saved in Supabase table: <b>calendar_events</b>.
+          </p>
+        </div>
+        <button
+          onClick={loadEvents}
+          className="px-3 py-2 rounded-lg border text-sm hover:bg-gray-50"
+          disabled={loading}
+        >
+          Refresh
+        </button>
       </div>
 
-      <div style={card}>
-        {loading ? (
-          <div style={{ opacity: 0.7, fontWeight: 800 }}>Loading…</div>
-        ) : rows.length === 0 ? (
-          <div style={{ opacity: 0.7, fontWeight: 800 }}>No events yet.</div>
-        ) : (
-          <div style={{ display: "grid", gap: 10 }}>
-            {rows.map((ev) => (
-              <div key={ev.id} style={item}>
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ fontWeight: 950 }}>{ev.title}</div>
-                  <div style={{ marginTop: 6, fontSize: 12, opacity: 0.75, display: "flex", gap: 8, flexWrap: "wrap" }}>
-                    <span>Start: {ev.starts_at ? new Date(ev.starts_at).toLocaleString() : ""}</span>
-                    {ev.ends_at ? <span>• End: {new Date(ev.ends_at).toLocaleString()}</span> : null}
-                    {ev.contact_id ? <span>• Contact: {ev.contact_id}</span> : null}
-                  </div>
-                </div>
+      {errorMsg && (
+        <div className="p-3 rounded-lg border border-red-200 bg-red-50 text-red-800 text-sm">
+          {errorMsg}
+        </div>
+      )}
 
-                <button type="button" onClick={() => remove(ev.id)} style={danger}>Delete</button>
-              </div>
-            ))}
+      <div className="rounded-2xl border p-4 space-y-3">
+        <div className="text-sm font-medium">Add Event</div>
+
+        <input
+          className="w-full border rounded-lg px-3 py-2"
+          placeholder="Event title (required)"
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+        />
+
+        <input
+          className="w-full border rounded-lg px-3 py-2"
+          placeholder="Location (optional)"
+          value={location}
+          onChange={(e) => setLocation(e.target.value)}
+        />
+
+        <textarea
+          className="w-full border rounded-lg px-3 py-2"
+          placeholder="Notes (optional)"
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          rows={3}
+        />
+
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="flex flex-col">
+            <label className="text-xs text-gray-500 mb-1">Start (required)</label>
+            <input
+              type="datetime-local"
+              className="border rounded-lg px-3 py-2"
+              value={startAt}
+              onChange={(e) => setStartAt(e.target.value)}
+            />
           </div>
-        )}
+
+          <div className="flex flex-col">
+            <label className="text-xs text-gray-500 mb-1">End (required)</label>
+            <input
+              type="datetime-local"
+              className="border rounded-lg px-3 py-2"
+              value={endAt}
+              onChange={(e) => setEndAt(e.target.value)}
+            />
+          </div>
+
+          <button
+            onClick={addEvent}
+            disabled={saving}
+            className="px-4 py-2 rounded-lg bg-black text-white text-sm disabled:opacity-60"
+          >
+            {saving ? "Saving..." : "Add"}
+          </button>
+        </div>
+      </div>
+
+      <div className="rounded-2xl border">
+        <div className="p-4 border-b flex items-center justify-between">
+          <div className="font-medium">Upcoming</div>
+          <div className="text-xs text-gray-500">{loading ? "Loading..." : `${events.length} events`}</div>
+        </div>
+
+        <div className="divide-y">
+          {events.map((e) => (
+            <div key={e.id} className="p-4 flex items-start justify-between gap-4">
+              <div className="min-w-0">
+                <div className="font-medium truncate">{e.title}</div>
+                <div className="text-sm text-gray-600 mt-1">
+                  {new Date(e.start_at).toLocaleString()} → {new Date(e.end_at).toLocaleString()}
+                </div>
+                {e.location && <div className="text-sm text-gray-600 mt-1">📍 {e.location}</div>}
+                {e.notes && <div className="text-sm text-gray-600 mt-2">{e.notes}</div>}
+              </div>
+
+              <button
+                onClick={() => deleteEvent(e.id)}
+                className="px-3 py-2 rounded-lg border text-sm hover:bg-gray-50"
+              >
+                Delete
+              </button>
+            </div>
+          ))}
+
+          {!loading && events.length === 0 && (
+            <div className="p-6 text-sm text-gray-500">No events yet.</div>
+          )}
+        </div>
       </div>
     </div>
   );
 }
-
-const card = { borderRadius: 18, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.04)", padding: 14, marginTop: 14 };
-const input = { padding: "12px 12px", borderRadius: 12, border: "1px solid rgba(255,255,255,0.16)", background: "rgba(0,0,0,0.25)", color: "white", outline: "none", fontWeight: 800 };
-const primary = { padding: "12px 14px", borderRadius: 12, border: "1px solid rgba(255,255,255,0.16)", background: "white", color: "black", fontWeight: 950, cursor: "pointer" };
-const item = { display: "flex", justifyContent: "space-between", gap: 12, padding: 12, borderRadius: 14, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(0,0,0,0.25)" };
-const danger = { borderRadius: 12, padding: "10px 12px", border: "1px solid rgba(239,68,68,0.35)", background: "rgba(239,68,68,0.10)", color: "#fecaca", fontWeight: 950, cursor: "pointer" };
