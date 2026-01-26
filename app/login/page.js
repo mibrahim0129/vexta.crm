@@ -3,10 +3,10 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useMemo, useState } from "react";
+import { Suspense, useMemo, useState } from "react";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 
-export default function LoginPage() {
+function LoginInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -44,7 +44,6 @@ export default function LoginPage() {
         return;
       }
 
-      // Important: refresh server components + middleware session state
       router.refresh();
       router.push(redirectTo);
     } catch (err) {
@@ -63,9 +62,7 @@ export default function LoginPage() {
               <span className="text-lg font-semibold tracking-tight">Vexta</span>
             </Link>
             <h1 className="mt-4 text-2xl font-semibold tracking-tight">Log in</h1>
-            <p className="mt-1 text-sm text-zinc-600">
-              Access your CRM dashboard.
-            </p>
+            <p className="mt-1 text-sm text-zinc-600">Access your CRM dashboard.</p>
           </div>
 
           {error ? (
@@ -119,5 +116,27 @@ export default function LoginPage() {
         </div>
       </div>
     </main>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense
+      fallback={
+        <main className="min-h-screen bg-zinc-50 text-zinc-900">
+          <div className="mx-auto flex min-h-screen max-w-6xl items-center justify-center px-4 py-12">
+            <div className="w-full max-w-md rounded-2xl border bg-white p-6 shadow-sm">
+              <div className="h-5 w-40 rounded bg-zinc-200" />
+              <div className="mt-4 h-4 w-64 rounded bg-zinc-200" />
+              <div className="mt-8 h-10 w-full rounded bg-zinc-200" />
+              <div className="mt-3 h-10 w-full rounded bg-zinc-200" />
+              <div className="mt-4 h-10 w-full rounded bg-zinc-200" />
+            </div>
+          </div>
+        </main>
+      }
+    >
+      <LoginInner />
+    </Suspense>
   );
 }
