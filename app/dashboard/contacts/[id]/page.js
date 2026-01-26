@@ -85,6 +85,7 @@ export default function ContactProfilePage() {
   const visibleEvents = showOnlyActiveDeal ? filteredByDeal(events, activeDealId) : events;
 
   const openTasksCount = tasks.filter((t) => !t.completed).length;
+
   const nextEvent = [...events]
     .filter((e) => e?.start_at)
     .sort((a, b) => String(a.start_at).localeCompare(String(b.start_at)))[0];
@@ -615,7 +616,15 @@ export default function ContactProfilePage() {
                 <div key={d.id} style={styles.item}>
                   <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" }}>
                     <div style={{ display: "grid", gap: 6 }}>
-                      <div style={{ fontWeight: 950 }}>{d.title}</div>
+                      <div style={{ fontWeight: 950 }}>
+                        <Link
+                          href={`/dashboard/deals/${d.id}`}
+                          style={{ color: "white", fontWeight: 950, textDecoration: "underline" }}
+                        >
+                          {d.title}
+                        </Link>
+                      </div>
+
                       <div style={{ opacity: 0.85, fontSize: 13 }}>
                         <span style={{ opacity: 0.75 }}>Status:</span>{" "}
                         <span style={{ fontWeight: 900 }}>{d.status || "—"}</span>{" "}
@@ -645,7 +654,10 @@ export default function ContactProfilePage() {
         {/* Notes */}
         <div style={styles.card}>
           <div style={styles.cardHeader}>
-            <h2 style={styles.h2}>Notes ({visibleNotes.length}{showOnlyActiveDeal && activeDealId ? " filtered" : ""})</h2>
+            <h2 style={styles.h2}>
+              Notes ({visibleNotes.length}
+              {showOnlyActiveDeal && activeDealId ? " filtered" : ""})
+            </h2>
           </div>
 
           <form onSubmit={addNote} style={styles.form}>
@@ -705,7 +717,10 @@ export default function ContactProfilePage() {
         {/* Tasks */}
         <div style={styles.card}>
           <div style={styles.cardHeader}>
-            <h2 style={styles.h2}>Tasks ({visibleTasks.length}{showOnlyActiveDeal && activeDealId ? " filtered" : ""})</h2>
+            <h2 style={styles.h2}>
+              Tasks ({visibleTasks.length}
+              {showOnlyActiveDeal && activeDealId ? " filtered" : ""})
+            </h2>
           </div>
 
           <form onSubmit={addTask} style={styles.form}>
@@ -813,7 +828,10 @@ export default function ContactProfilePage() {
         {/* Calendar */}
         <div style={styles.card}>
           <div style={styles.cardHeader}>
-            <h2 style={styles.h2}>Calendar ({visibleEvents.length}{showOnlyActiveDeal && activeDealId ? " filtered" : ""})</h2>
+            <h2 style={styles.h2}>
+              Calendar ({visibleEvents.length}
+              {showOnlyActiveDeal && activeDealId ? " filtered" : ""})
+            </h2>
           </div>
 
           <form onSubmit={addEvent} style={styles.form}>
