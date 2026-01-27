@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { supabaseBrowser } from "@/lib/supabaseBrowser";
+import { supabaseBrowser } from "@/lib/supabase/browser";
 
 export default function TasksPage() {
   const sb = useMemo(() => supabaseBrowser(), []);
@@ -328,7 +328,9 @@ export default function TasksPage() {
   // Buckets (feel like a real CRM)
   const overdue = sortByDueThenCreated(filteredTasks.filter((t) => isOverdue(t.due_at, t.completed)));
   const dueToday = sortByDueThenCreated(filteredTasks.filter((t) => !t.completed && isToday(t.due_at)));
-  const next7 = sortByDueThenCreated(filteredTasks.filter((t) => isWithinNext7Days(t.due_at, t.completed) && !isToday(t.due_at)));
+  const next7 = sortByDueThenCreated(
+    filteredTasks.filter((t) => isWithinNext7Days(t.due_at, t.completed) && !isToday(t.due_at))
+  );
   const noDue = sortByDueThenCreated(filteredTasks.filter((t) => !t.completed && !t.due_at));
   const completed = sortByDueThenCreated(filteredTasks.filter((t) => t.completed));
 
@@ -513,9 +515,7 @@ export default function TasksPage() {
       {/* Filters */}
       <div style={styles.card}>
         <div style={styles.cardHeader}>
-          <h2 style={styles.h2}>
-            View {loading ? "(loading...)" : `(${filteredTasks.length})`}
-          </h2>
+          <h2 style={styles.h2}>View {loading ? "(loading...)" : `(${filteredTasks.length})`}</h2>
         </div>
 
         <div style={styles.filters}>
@@ -602,8 +602,11 @@ export default function TasksPage() {
               </Bucket>
             ) : null}
 
-            {/* If open-only and none hit the buckets */}
-            {filterStatus === "open" && overdue.length === 0 && dueToday.length === 0 && next7.length === 0 && noDue.length === 0 ? (
+            {filterStatus === "open" &&
+            overdue.length === 0 &&
+            dueToday.length === 0 &&
+            next7.length === 0 &&
+            noDue.length === 0 ? (
               <div style={{ opacity: 0.75 }}>No open tasks match your filters.</div>
             ) : null}
           </div>
