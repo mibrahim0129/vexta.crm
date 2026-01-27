@@ -1,53 +1,50 @@
 // app/auth/callback/route.js
 import { NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
-import { cookies } from "next/headers";
+
+export const runtime = "nodejs"; // keeps it stable on Vercel
 
 export async function GET(request) {
   const reqUrl = new URL(request.url);
   const code = reqUrl.searchParams.get("code");
   const next = reqUrl.searchParams.get("next") || "/dashboard";
 
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+  // Always redirect somewhere (never 500)
+  const redirectOk = NextResponse.redirect(new URL(next, reqUrl.origin));
+  const redirectBad = (reason) => {
+    const bad = NextResponse.redirect(new URL(`/login?error=${reason}`, reqUrl.origin));
+    return bad;
+  };
+
   try {
-    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    if (!url || !anon) return redirectBad("missing_supabase_env");
 
-    if (!url || !anon) {
-      const bad = new URL("/login", reqUrl.origin);
-      bad.searchParams.set("error", "missing_supabase_env");
-      return NextResponse.redirect(bad);
-    }
+    // If no code, just go to next
+    if (!code) return redirectOk;
 
-    if (code) {
-      const cookieStore = cookies();
-
-      const supabase = createServerClient(url, anon, {
-        cookies: {
-          getAll() {
-            return cookieStore.getAll();
-          },
-          setAll(cookiesToSet) {
-            cookiesToSet.forEach(({ name, value, options }) => {
-              cookieStore.set(name, value, options);
-            });
-          },
+    // IMPORTANT: set cookies on the RESPONSE, not via next/headers cookies()
+    const supabase = createServerClient(url, anon, {
+      cookies: {
+        getAll() {
+          return request.cookies.getAll();
         },
-      });
+        setAll(cookiesToSet) {
+          cookiesToSet.forEach(({ name, value, options }) => {
+            redirectOk.cookies.set(name, value, options);
+          });
+        },
+      },
+    });
 
-      const { error } = await supabase.auth.exchangeCodeForSession(code);
-      if (error) {
-        const bad = new URL("/login", reqUrl.origin);
-        bad.searchParams.set("error", "oauth_exchange_failed");
-        return NextResponse.redirect(bad);
-      }
-    }
+    const { error } = await supabase.auth.exchangeCodeForSession(code);
+    if (error) return redirectBad("oauth_exchange_failed");
 
-    return NextResponse.redirect(new URL(next, reqUrl.origin));
+    return redirectOk;
   } catch (e) {
-    console.error("Auth callback error:", e);
-
-    const bad = new URL("/login", reqUrl.origin);
-    bad.searchParams.set("error", "callback_exception");
-    return NextResponse.redirect(bad);
+    console.error("Auth callback exception:", e);
+    return redirectBad("callback_exception");
   }
 }
