@@ -64,7 +64,6 @@ function LoginInner() {
 
       if (signInError) {
         setError(signInError.message || "Login failed.");
-        setLoading(false);
         return;
       }
 
@@ -85,21 +84,30 @@ function LoginInner() {
       const origin = window.location.origin;
       const cb = `${origin}/auth/callback?next=${encodeURIComponent(redirectTo)}`;
 
-      const { error } = await sb.auth.signInWithOAuth({
+      // Force manual redirect so we KNOW we leave the site to Supabase/Google
+      const { data, error } = await sb.auth.signInWithOAuth({
         provider: "google",
         options: {
           redirectTo: cb,
-          queryParams: {
-            prompt: "select_account",
-          },
+          queryParams: { prompt: "select_account" },
+          skipBrowserRedirect: true,
         },
       });
 
       if (error) {
         setError(error.message || "Google sign-in failed.");
         setOauthLoading(false);
+        return;
       }
-      // Note: on success, browser navigates away to Google
+
+      if (!data?.url) {
+        setError("Google sign-in failed: missing OAuth URL.");
+        setOauthLoading(false);
+        return;
+      }
+
+      // This MUST navigate to: https://<project>.supabase.co/auth/v1/authorize...
+      window.location.assign(data.url);
     } catch (e) {
       setError(e?.message || "Google sign-in failed. Please try again.");
       setOauthLoading(false);
@@ -391,12 +399,6 @@ function LoginInner() {
           background: #fff;
           color: #0a0a0a;
         }
-        .btnPrimary:hover {
-          background: rgba(255, 255, 255, 0.92);
-        }
-        .btnGhost:hover {
-          background: rgba(255, 255, 255, 0.1);
-        }
         .bottomLinks {
           margin-top: 14px;
           display: flex;
@@ -408,10 +410,6 @@ function LoginInner() {
           color: rgba(255, 255, 255, 0.7);
           text-decoration: none;
           font-weight: 850;
-        }
-        .bottomLinks :global(a:hover) {
-          color: #fff;
-          text-decoration: underline;
         }
         .fine {
           font-size: 12px;
