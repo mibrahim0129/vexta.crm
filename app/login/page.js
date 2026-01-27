@@ -32,6 +32,7 @@ function GoogleIcon() {
 function LoginInner() {
   const router = useRouter();
   const sp = useSearchParams();
+  const sb = useMemo(() => supabaseBrowser(), []);
 
   const redirectTo = useMemo(() => {
     const r = sp.get("redirectTo") || sp.get("next");
@@ -56,8 +57,7 @@ function LoginInner() {
 
     setLoading(true);
     try {
-      const supabase = supabaseBrowser();
-      const { error: signInError } = await supabase.auth.signInWithPassword({
+      const { error: signInError } = await sb.auth.signInWithPassword({
         email,
         password,
       });
@@ -72,6 +72,7 @@ function LoginInner() {
       router.push(redirectTo);
     } catch {
       setError("Something went wrong. Please try again.");
+    } finally {
       setLoading(false);
     }
   }
@@ -81,13 +82,16 @@ function LoginInner() {
     setOauthLoading(true);
 
     try {
-      const supabase = supabaseBrowser();
       const origin = window.location.origin;
+      const cb = `${origin}/auth/callback?next=${encodeURIComponent(redirectTo)}`;
 
-      const { error } = await supabase.auth.signInWithOAuth({
+      const { error } = await sb.auth.signInWithOAuth({
         provider: "google",
         options: {
-          redirectTo: `${origin}/auth/callback?next=${encodeURIComponent(redirectTo)}`,
+          redirectTo: cb,
+          queryParams: {
+            prompt: "select_account",
+          },
         },
       });
 
@@ -95,8 +99,9 @@ function LoginInner() {
         setError(error.message || "Google sign-in failed.");
         setOauthLoading(false);
       }
-    } catch {
-      setError("Google sign-in failed. Please try again.");
+      // Note: on success, browser navigates away to Google
+    } catch (e) {
+      setError(e?.message || "Google sign-in failed. Please try again.");
       setOauthLoading(false);
     }
   }
@@ -114,8 +119,8 @@ function LoginInner() {
 
           <h1 className="h1">Welcome back.</h1>
           <p className="p">
-            Log in to manage contacts, deals, tasks, notes, and calendar events — all linked, fast,
-            and clean.
+            Log in to manage contacts, deals, tasks, notes, and calendar events — all linked,
+            fast, and clean.
           </p>
 
           <div className="leftStack">
@@ -186,7 +191,11 @@ function LoginInner() {
                 />
               </label>
 
-              <button type="submit" className="btn btnGhost btnFull" disabled={loading || oauthLoading}>
+              <button
+                type="submit"
+                className="btn btnGhost btnFull"
+                disabled={loading || oauthLoading}
+              >
                 {loading ? "Logging in..." : "Log in"}
               </button>
             </form>
@@ -351,9 +360,6 @@ function LoginInner() {
           color: #fff;
           outline: none;
           font-size: 14px;
-        }
-        .input::placeholder {
-          color: rgba(255, 255, 255, 0.35);
         }
         .btn {
           display: inline-flex;
