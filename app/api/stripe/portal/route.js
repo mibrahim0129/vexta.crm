@@ -1,10 +1,18 @@
 // app/api/stripe/portal/route.js
 import { NextResponse } from "next/server";
-import { stripe } from "@/lib/stripe";
+import { getStripe } from "@/lib/stripe";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 
 export async function POST(req) {
   try {
+    const stripe = getStripe();
+    if (!stripe) {
+      return NextResponse.json(
+        { error: "Missing STRIPE_SECRET_KEY env var" },
+        { status: 500 }
+      );
+    }
+
     const { user_id } = await req.json();
     if (!user_id) return NextResponse.json({ error: "Missing user_id" }, { status: 400 });
 
@@ -22,7 +30,9 @@ export async function POST(req) {
     if (error) throw error;
 
     const customerId = data?.stripe_customer_id;
-    if (!customerId) return NextResponse.json({ error: "No Stripe customer found" }, { status: 404 });
+    if (!customerId) {
+      return NextResponse.json({ error: "No Stripe customer found for this user yet" }, { status: 404 });
+    }
 
     const session = await stripe.billingPortal.sessions.create({
       customer: customerId,

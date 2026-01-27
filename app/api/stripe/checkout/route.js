@@ -1,10 +1,18 @@
 // app/api/stripe/checkout/route.js
 import { NextResponse } from "next/server";
-import { stripe } from "@/lib/stripe";
+import { getStripe } from "@/lib/stripe";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 
 export async function POST(req) {
   try {
+    const stripe = getStripe();
+    if (!stripe) {
+      return NextResponse.json(
+        { error: "Missing STRIPE_SECRET_KEY env var" },
+        { status: 500 }
+      );
+    }
+
     const { user_id, email, priceId } = await req.json();
 
     if (!user_id || !email || !priceId) {
