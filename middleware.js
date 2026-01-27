@@ -1,10 +1,10 @@
 // middleware.js
-import { updateSession } from "@/lib/supabase/middleware";
+import { NextResponse } from "next/server";
 
-export async function middleware(request) {
-  return updateSession(request);
+export function middleware() {
+  return NextResponse.next();
 }
 
 export const config = {
-  matcher: ["/dashboard/:path*", "/login", "/signup"],
+  matcher: ["/dashboard/:path*", "/login", "/signup", "/auth/callback/:path*"],
 };

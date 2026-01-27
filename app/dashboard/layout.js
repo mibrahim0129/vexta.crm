@@ -9,8 +9,6 @@ import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 export default function DashboardLayout({ children }) {
   const pathname = usePathname();
   const router = useRouter();
-
-  // Use the SAME client approach as login/signup
   const sb = useMemo(() => createSupabaseBrowserClient(), []);
 
   const [email, setEmail] = useState("");
@@ -21,13 +19,25 @@ export default function DashboardLayout({ children }) {
     let mounted = true;
 
     (async () => {
-      const { data } = await sb.auth.getUser();
+      const { data } = await sb.auth.getSession();
+      const session = data?.session;
+
+      if (!session) {
+        const next = pathname ? pathname : "/dashboard";
+        router.replace(`/login?next=${encodeURIComponent(next)}`);
+        return;
+      }
+
       if (!mounted) return;
-      setEmail(data?.user?.email || "");
+      setEmail(session.user?.email || "");
     })();
 
     const { data: sub } = sb.auth.onAuthStateChange((_event, session) => {
       setEmail(session?.user?.email || "");
+      if (!session) {
+        const next = pathname ? pathname : "/dashboard";
+        router.replace(`/login?next=${encodeURIComponent(next)}`);
+      }
     });
 
     return () => {
@@ -35,7 +45,7 @@ export default function DashboardLayout({ children }) {
       sub?.subscription?.unsubscribe?.();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [pathname]);
 
   async function logout() {
     try {
@@ -61,7 +71,6 @@ export default function DashboardLayout({ children }) {
 
   return (
     <div style={styles.shell}>
-      {/* SIDEBAR */}
       <aside
         style={{
           ...styles.sidebar,
@@ -141,9 +150,7 @@ export default function DashboardLayout({ children }) {
         </div>
       </aside>
 
-      {/* MAIN */}
       <div style={styles.main}>
-        {/* TOP BAR */}
         <div style={styles.topbar}>
           <div style={styles.topbarLeft}>
             <div style={styles.breadcrumb}>
@@ -164,7 +171,6 @@ export default function DashboardLayout({ children }) {
           </div>
         </div>
 
-        {/* PAGE CONTENT */}
         <div style={styles.content}>
           <div style={styles.container}>{children}</div>
         </div>
@@ -181,7 +187,6 @@ const styles = {
     display: "grid",
     gridTemplateColumns: "auto 1fr",
   },
-
   sidebar: {
     borderRight: "1px solid #1f1f1f",
     background: "#0f0f0f",
@@ -190,7 +195,6 @@ const styles = {
     flexDirection: "column",
     gap: 12,
   },
-
   brand: {
     display: "flex",
     alignItems: "center",
@@ -224,7 +228,6 @@ const styles = {
     cursor: "pointer",
     padding: "6px 10px",
   },
-
   searchWrap: {
     borderRadius: 14,
     border: "1px solid #1f1f1f",
@@ -242,7 +245,6 @@ const styles = {
     fontWeight: 800,
     fontSize: 13,
   },
-
   nav: { display: "grid", gap: 8, marginTop: 2 },
   navItem: {
     padding: "10px 12px",
@@ -262,7 +264,6 @@ const styles = {
     border: "1px solid rgba(255,255,255,0.18)",
     opacity: 1,
   },
-
   sidebarBottom: { marginTop: "auto", display: "grid", gap: 10 },
   userBlock: {
     display: "flex",
@@ -291,7 +292,6 @@ const styles = {
     whiteSpace: "nowrap",
     maxWidth: 170,
   },
-
   sideHint: {
     fontSize: 12,
     opacity: 0.65,
@@ -301,9 +301,7 @@ const styles = {
     border: "1px solid #1f1f1f",
     background: "#0f0f0f",
   },
-
   main: { display: "flex", flexDirection: "column" },
-
   topbar: {
     height: 60,
     borderBottom: "1px solid #1f1f1f",
@@ -319,9 +317,7 @@ const styles = {
   },
   topbarLeft: { display: "flex", alignItems: "center", gap: 10 },
   breadcrumb: { fontWeight: 950, opacity: 0.9 },
-
   topbarRight: { display: "flex", gap: 10 },
-
   topBtn: {
     padding: "8px 12px",
     borderRadius: 999,
@@ -338,11 +334,6 @@ const styles = {
     background: "rgba(239,68,68,0.10)",
     color: "#fecaca",
   },
-
   content: { padding: 18 },
-  container: {
-    maxWidth: 1100,
-    margin: "0 auto",
-    width: "100%",
-  },
+  container: { maxWidth: 1100, margin: "0 auto", width: "100%" },
 };
