@@ -4,7 +4,7 @@
 import Link from "next/link";
 import { Suspense, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { createSupabaseBrowserClient } from "@/lib/supabase/client";
+import { supabaseBrowser } from "@/lib/supabaseBrowser";
 
 function GoogleIcon() {
   return (
@@ -56,7 +56,7 @@ function LoginInner() {
 
     setLoading(true);
     try {
-      const supabase = createSupabaseBrowserClient();
+      const supabase = supabaseBrowser();
       const { error: signInError } = await supabase.auth.signInWithPassword({
         email,
         password,
@@ -81,7 +81,7 @@ function LoginInner() {
     setOauthLoading(true);
 
     try {
-      const supabase = createSupabaseBrowserClient();
+      const supabase = supabaseBrowser();
       const origin = window.location.origin;
 
       const { error } = await supabase.auth.signInWithOAuth({

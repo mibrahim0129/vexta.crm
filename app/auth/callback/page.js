@@ -3,7 +3,7 @@
 
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { createSupabaseBrowserClient } from "@/lib/supabase/client";
+import { supabaseBrowser } from "@/lib/supabaseBrowser";
 
 export default function AuthCallbackPage() {
   return (
@@ -25,7 +25,7 @@ function Fallback() {
 }
 
 function Inner() {
-  const sb = useMemo(() => createSupabaseBrowserClient(), []);
+  const sb = useMemo(() => supabaseBrowser(), []);
   const router = useRouter();
   const sp = useSearchParams();
 
@@ -46,10 +46,14 @@ function Inner() {
           return;
         }
 
-        if (code) {
-          const { error: exErr } = await sb.auth.exchangeCodeForSession(code);
-          if (exErr) throw exErr;
+        if (!code) {
+          setErr("Missing code. Please try logging in again.");
+          setMsg("Sign-in failed.");
+          return;
         }
+
+        const { error: exErr } = await sb.auth.exchangeCodeForSession(code);
+        if (exErr) throw exErr;
 
         const { data } = await sb.auth.getSession();
         if (!data?.session) {
@@ -102,7 +106,7 @@ const styles = {
   },
   card: {
     width: "100%",
-    maxWidth: 520,
+    maxWidth: 720,
     border: "1px solid rgba(255,255,255,0.12)",
     background: "rgba(0,0,0,0.55)",
     borderRadius: 18,
@@ -110,7 +114,7 @@ const styles = {
     boxShadow: "0 12px 40px rgba(0,0,0,0.45)",
     backdropFilter: "blur(10px)",
   },
-  h1: { margin: 0, fontSize: 30, letterSpacing: -0.6, fontWeight: 950 },
+  h1: { margin: 0, fontSize: 34, letterSpacing: -0.6, fontWeight: 950 },
   p: { marginTop: 10, opacity: 0.8, lineHeight: 1.4 },
   error: {
     marginTop: 12,
@@ -120,6 +124,7 @@ const styles = {
     borderRadius: 12,
     padding: 12,
     fontWeight: 900,
+    lineHeight: 1.4,
   },
   small: { marginTop: 12, fontSize: 12, opacity: 0.75, lineHeight: 1.4 },
   link: { color: "white", fontWeight: 900, textDecoration: "underline" },
