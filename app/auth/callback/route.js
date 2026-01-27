@@ -1,7 +1,6 @@
 // app/auth/callback/route.js
 import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
-import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
+import { createServerClient } from "@supabase/ssr";
 
 export const runtime = "nodejs";
 
@@ -10,11 +9,33 @@ export async function GET(request) {
   const code = reqUrl.searchParams.get("code");
   const next = reqUrl.searchParams.get("next") || "/dashboard";
 
-  try {
-    if (code) {
-      const supabase = createRouteHandlerClient({ cookies });
-      const { error } = await supabase.auth.exchangeCodeForSession(code);
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
+  if (!supabaseUrl || !supabaseAnonKey) {
+    return NextResponse.redirect(new URL("/login?error=missing_supabase_env", reqUrl.origin));
+  }
+
+  // Create the redirect response FIRST
+  const response = NextResponse.redirect(new URL(next, reqUrl.origin));
+
+  try {
+    // Create supabase client bound to request+response cookies
+    const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
+      cookies: {
+        getAll() {
+          return request.cookies.getAll();
+        },
+        setAll(cookiesToSet) {
+          cookiesToSet.forEach(({ name, value, options }) => {
+            response.cookies.set(name, value, options);
+          });
+        },
+      },
+    });
+
+    if (code) {
+      const { error } = await supabase.auth.exchangeCodeForSession(code);
       if (error) {
         const bad = new URL("/login", reqUrl.origin);
         bad.searchParams.set("error", "oauth_exchange_failed");
@@ -23,7 +44,7 @@ export async function GET(request) {
       }
     }
 
-    return NextResponse.redirect(new URL(next, reqUrl.origin));
+    return response;
   } catch (e) {
     const bad = new URL("/login", reqUrl.origin);
     bad.searchParams.set("error", "callback_exception");
