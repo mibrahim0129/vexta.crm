@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { supabaseBrowser } from "@/lib/supabaseBrowser";
+import { supabaseBrowser } from "@/lib/supabase/browser";
 
 export default function SettingsPage() {
   const sb = useMemo(() => supabaseBrowser(), []);
