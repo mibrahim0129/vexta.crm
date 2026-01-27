@@ -3,7 +3,7 @@
 
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { supabaseBrowser } from "@/lib/supabaseBrowser";
+import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 
 export default function AuthCallbackPage() {
   return (
@@ -25,7 +25,7 @@ function Fallback() {
 }
 
 function Inner() {
-  const sb = useMemo(() => supabaseBrowser(), []);
+  const sb = useMemo(() => createSupabaseBrowserClient(), []);
   const router = useRouter();
   const sp = useSearchParams();
 
@@ -43,6 +43,15 @@ function Inner() {
         if (error) {
           setErr(`${error}${errorDesc ? `: ${errorDesc}` : ""}`);
           setMsg("Sign-in failed.");
+          return;
+        }
+
+        // If Supabase already detected session from URL, we’re good.
+        const pre = await sb.auth.getSession();
+        if (pre?.data?.session) {
+          setMsg("Signed in! Redirecting…");
+          router.replace(next);
+          router.refresh();
           return;
         }
 
@@ -106,7 +115,7 @@ const styles = {
   },
   card: {
     width: "100%",
-    maxWidth: 720,
+    maxWidth: 780,
     border: "1px solid rgba(255,255,255,0.12)",
     background: "rgba(0,0,0,0.55)",
     borderRadius: 18,

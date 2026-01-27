@@ -4,7 +4,7 @@
 import Link from "next/link";
 import { Suspense, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { createSupabaseBrowserClient } from "@/lib/supabase/client";
+import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 
 function GoogleIcon() {
   return (
@@ -32,6 +32,7 @@ function GoogleIcon() {
 function SignupInner() {
   const router = useRouter();
   const sp = useSearchParams();
+  const sb = useMemo(() => createSupabaseBrowserClient(), []);
 
   const redirectTo = useMemo(() => {
     const r = sp.get("redirectTo") || sp.get("next");
@@ -44,65 +45,64 @@ function SignupInner() {
   const [loading, setLoading] = useState(false);
   const [oauthLoading, setOauthLoading] = useState(false);
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
+  const [ok, setOk] = useState("");
 
   async function onSubmit(e) {
     e.preventDefault();
     setError("");
-    setNotice("");
+    setOk("");
 
     if (!email || !password) {
-      setError("Please enter your email and password.");
+      setError("Please enter an email and password.");
+      return;
+    }
+    if (password.length < 6) {
+      setError("Password must be at least 6 characters.");
       return;
     }
 
     setLoading(true);
     try {
-      const supabase = createSupabaseBrowserClient();
-      const origin = window.location.origin;
-
-      const { data, error: signUpError } = await supabase.auth.signUp({
+      const { data, error: signUpError } = await sb.auth.signUp({
         email,
         password,
-        options: {
-          emailRedirectTo: `${origin}/auth/callback?next=${encodeURIComponent(redirectTo)}`,
-        },
       });
 
       if (signUpError) {
-        setError(signUpError.message || "Signup failed.");
-        setLoading(false);
+        setError(signUpError.message || "Sign up failed.");
         return;
       }
 
-      // If email confirmations are ON, there may be no session yet.
-      if (!data?.session) {
-        setNotice("Account created. Check your email to confirm, then come back and log in.");
-        setLoading(false);
+      // If session exists immediately, go dashboard.
+      if (data?.session) {
+        router.refresh();
+        router.push(redirectTo);
         return;
       }
 
-      router.refresh();
-      router.push(redirectTo);
+      // Otherwise email confirmation might be required.
+      setOk("Account created. Check your email to confirm, then log in.");
     } catch {
       setError("Something went wrong. Please try again.");
+    } finally {
       setLoading(false);
     }
   }
 
   async function signUpWithGoogle() {
     setError("");
-    setNotice("");
+    setOk("");
     setOauthLoading(true);
 
     try {
-      const supabase = createSupabaseBrowserClient();
       const origin = window.location.origin;
+      const cb = `${origin}/auth/callback?next=${encodeURIComponent(redirectTo)}`;
 
-      const { error } = await supabase.auth.signInWithOAuth({
+      const { error } = await sb.auth.signInWithOAuth({
         provider: "google",
         options: {
-          redirectTo: `${origin}/auth/callback?next=${encodeURIComponent(redirectTo)}`,
+          redirectTo: cb,
+          queryParams: { prompt: "select_account" },
         },
       });
 
@@ -110,86 +110,249 @@ function SignupInner() {
         setError(error.message || "Google sign-in failed.");
         setOauthLoading(false);
       }
-    } catch {
-      setError("Google sign-in failed. Please try again.");
+    } catch (e) {
+      setError(e?.message || "Google sign-in failed. Please try again.");
       setOauthLoading(false);
     }
   }
 
   return (
-    <main style={styles.page}>
-      <div style={styles.bg} />
+    <main className="page">
+      <div className="bg" />
 
-      <div style={styles.card}>
-        <Link href="/" style={styles.brand}>
-          <span style={styles.logo} />
-          <span style={styles.brandName}>Vexta</span>
-        </Link>
+      <div className="wrap">
+        <div className="card">
+          <Link href="/" className="brand">
+            <span className="logo" />
+            <span className="brandName">Vexta</span>
+          </Link>
 
-        <h1 style={styles.h1}>Create your account</h1>
-        <p style={styles.p}>Start managing your pipeline in one place.</p>
+          <h1 className="h1">Create your account</h1>
+          <p className="p">Start managing your pipeline in one place.</p>
 
-        {error ? <div style={styles.error}>{error}</div> : null}
-        {notice ? <div style={styles.notice}>{notice}</div> : null}
-
-        <button
-          type="button"
-          onClick={signUpWithGoogle}
-          disabled={loading || oauthLoading}
-          style={{ ...styles.btn, ...styles.btnPrimary, opacity: loading || oauthLoading ? 0.7 : 1 }}
-        >
-          <GoogleIcon /> {oauthLoading ? "Connecting..." : "Continue with Google"}
-        </button>
-
-        <div style={styles.orRow}>
-          <div style={styles.line} />
-          <div style={styles.or}>or</div>
-          <div style={styles.line} />
-        </div>
-
-        <form onSubmit={onSubmit} style={styles.form}>
-          <label style={styles.label}>
-            Email
-            <input
-              style={styles.input}
-              type="email"
-              autoComplete="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@email.com"
-            />
-          </label>
-
-          <label style={styles.label}>
-            Password
-            <input
-              style={styles.input}
-              type="password"
-              autoComplete="new-password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••••"
-            />
-          </label>
+          {error ? <div className="error">{error}</div> : null}
+          {ok ? <div className="ok">{ok}</div> : null}
 
           <button
-            type="submit"
+            type="button"
+            className="btn btnPrimary btnFull"
+            onClick={signUpWithGoogle}
             disabled={loading || oauthLoading}
-            style={{ ...styles.btn, ...styles.btnGhost, opacity: loading || oauthLoading ? 0.7 : 1 }}
           >
-            {loading ? "Creating..." : "Create account"}
+            <GoogleIcon />
+            {oauthLoading ? "Connecting..." : "Continue with Google"}
           </button>
-        </form>
 
-        <div style={styles.links}>
-          <Link href="/login" style={styles.link}>
-            Already have an account?
-          </Link>
-          <Link href="/" style={styles.link}>
-            Back to home
-          </Link>
+          <div className="orRow">
+            <div className="line" />
+            <div className="or">or</div>
+            <div className="line" />
+          </div>
+
+          <form onSubmit={onSubmit} className="form">
+            <label className="label">
+              Email
+              <input
+                className="input"
+                type="email"
+                autoComplete="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="you@email.com"
+              />
+            </label>
+
+            <label className="label">
+              Password
+              <input
+                className="input"
+                type="password"
+                autoComplete="new-password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="Create a password"
+              />
+            </label>
+
+            <button
+              type="submit"
+              className="btn btnGhost btnFull"
+              disabled={loading || oauthLoading}
+            >
+              {loading ? "Creating..." : "Create account"}
+            </button>
+          </form>
+
+          <div className="bottomLinks">
+            <Link href="/login">Already have an account?</Link>
+            <Link href="/">Back to home</Link>
+          </div>
         </div>
       </div>
+
+      <style jsx>{`
+        .page {
+          min-height: 100vh;
+          color: #fff;
+          background: #0a0a0a;
+          display: grid;
+          place-items: center;
+          padding: 24px 18px;
+        }
+        .bg {
+          position: fixed;
+          inset: 0;
+          z-index: -1;
+          background: radial-gradient(1000px circle at 20% 10%, rgba(255, 255, 255, 0.12), transparent 60%),
+            radial-gradient(900px circle at 80% 35%, rgba(255, 255, 255, 0.1), transparent 55%),
+            linear-gradient(to bottom, #0a0a0a, #000);
+        }
+        .wrap {
+          width: 100%;
+          max-width: 560px;
+        }
+        .card {
+          border-radius: 18px;
+          border: 1px solid rgba(255, 255, 255, 0.1);
+          background: rgba(255, 255, 255, 0.06);
+          box-shadow: 0 30px 120px rgba(0, 0, 0, 0.55);
+          padding: 18px;
+        }
+        .brand {
+          display: inline-flex;
+          align-items: center;
+          gap: 10px;
+          text-decoration: none;
+          color: #fff;
+        }
+        .logo {
+          width: 34px;
+          height: 34px;
+          border-radius: 12px;
+          background: #fff;
+        }
+        .brandName {
+          font-size: 18px;
+          font-weight: 900;
+          letter-spacing: -0.4px;
+        }
+        .h1 {
+          margin: 14px 0 0;
+          font-size: 28px;
+          font-weight: 950;
+          letter-spacing: -0.6px;
+        }
+        .p {
+          margin: 8px 0 0;
+          color: rgba(255, 255, 255, 0.65);
+          font-size: 13px;
+        }
+        .error {
+          margin-top: 12px;
+          border-radius: 14px;
+          border: 1px solid rgba(239, 68, 68, 0.35);
+          background: rgba(239, 68, 68, 0.1);
+          color: #fecaca;
+          padding: 12px;
+          font-weight: 850;
+          font-size: 13px;
+          line-height: 1.35;
+        }
+        .ok {
+          margin-top: 12px;
+          border-radius: 14px;
+          border: 1px solid rgba(34, 197, 94, 0.25);
+          background: rgba(34, 197, 94, 0.08);
+          color: rgba(220, 252, 231, 0.95);
+          padding: 12px;
+          font-weight: 850;
+          font-size: 13px;
+          line-height: 1.35;
+        }
+        .orRow {
+          margin: 14px 0;
+          display: flex;
+          align-items: center;
+          gap: 10px;
+        }
+        .line {
+          height: 1px;
+          flex: 1;
+          background: rgba(255, 255, 255, 0.1);
+        }
+        .or {
+          font-size: 12px;
+          color: rgba(255, 255, 255, 0.55);
+          font-weight: 800;
+        }
+        .form {
+          display: grid;
+          gap: 12px;
+          margin-top: 6px;
+        }
+        .label {
+          display: grid;
+          gap: 6px;
+          font-size: 12px;
+          font-weight: 900;
+          color: rgba(255, 255, 255, 0.8);
+        }
+        .input {
+          width: 100%;
+          border-radius: 14px;
+          border: 1px solid rgba(255, 255, 255, 0.1);
+          background: rgba(0, 0, 0, 0.28);
+          padding: 10px 12px;
+          color: #fff;
+          outline: none;
+          font-size: 14px;
+        }
+        .btn {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          gap: 10px;
+          padding: 10px 12px;
+          border-radius: 14px;
+          border: 1px solid rgba(255, 255, 255, 0.12);
+          font-weight: 900;
+          font-size: 14px;
+          cursor: pointer;
+          user-select: none;
+          transition: transform 0.05s ease, background 0.15s ease;
+          color: #fff;
+          background: rgba(255, 255, 255, 0.06);
+        }
+        .btn:active {
+          transform: translateY(1px);
+        }
+        .btn:disabled {
+          opacity: 0.65;
+          cursor: not-allowed;
+        }
+        .btnFull {
+          width: 100%;
+        }
+        .btnPrimary {
+          background: #fff;
+          color: #0a0a0a;
+        }
+        .btnGhost:hover {
+          background: rgba(255, 255, 255, 0.1);
+        }
+        .bottomLinks {
+          margin-top: 14px;
+          display: flex;
+          justify-content: space-between;
+          gap: 12px;
+          font-size: 13px;
+        }
+        .bottomLinks :global(a) {
+          color: rgba(255, 255, 255, 0.7);
+          text-decoration: none;
+          font-weight: 850;
+        }
+      `}</style>
     </main>
   );
 }
@@ -201,82 +364,3 @@ export default function SignupPage() {
     </Suspense>
   );
 }
-
-const styles = {
-  page: { minHeight: "100vh", display: "grid", placeItems: "center", background: "#0a0a0a", color: "#fff" },
-  bg: {
-    position: "fixed",
-    inset: 0,
-    zIndex: -1,
-    background:
-      "radial-gradient(1000px circle at 20% 10%, rgba(255,255,255,0.12), transparent 60%), radial-gradient(900px circle at 80% 35%, rgba(255,255,255,0.10), transparent 55%), linear-gradient(to bottom, #0a0a0a, #000)",
-  },
-  card: {
-    width: "100%",
-    maxWidth: 460,
-    padding: 18,
-    borderRadius: 18,
-    border: "1px solid rgba(255,255,255,0.10)",
-    background: "rgba(255,255,255,0.06)",
-    boxShadow: "0 30px 120px rgba(0,0,0,0.55)",
-  },
-  brand: { display: "inline-flex", alignItems: "center", gap: 10, textDecoration: "none", color: "#fff" },
-  logo: { width: 36, height: 36, borderRadius: 12, background: "#fff" },
-  brandName: { fontSize: 18, fontWeight: 900, letterSpacing: -0.4 },
-  h1: { margin: "14px 0 0", fontSize: 26, fontWeight: 950, letterSpacing: -0.6 },
-  p: { marginTop: 8, fontSize: 13, opacity: 0.7, lineHeight: 1.4 },
-  error: {
-    marginTop: 12,
-    borderRadius: 14,
-    border: "1px solid rgba(239,68,68,0.35)",
-    background: "rgba(239,68,68,0.10)",
-    color: "#fecaca",
-    padding: 12,
-    fontWeight: 850,
-    fontSize: 13,
-  },
-  notice: {
-    marginTop: 12,
-    borderRadius: 14,
-    border: "1px solid rgba(16,185,129,0.35)",
-    background: "rgba(16,185,129,0.12)",
-    color: "#d1fae5",
-    padding: 12,
-    fontWeight: 850,
-    fontSize: 13,
-    lineHeight: 1.4,
-  },
-  btn: {
-    width: "100%",
-    marginTop: 12,
-    padding: "10px 12px",
-    borderRadius: 14,
-    border: "1px solid rgba(255,255,255,0.12)",
-    fontWeight: 900,
-    fontSize: 14,
-    cursor: "pointer",
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 10,
-  },
-  btnPrimary: { background: "#fff", color: "#0a0a0a" },
-  btnGhost: { background: "rgba(255,255,255,0.06)", color: "#fff" },
-  orRow: { margin: "14px 0", display: "flex", alignItems: "center", gap: 10 },
-  line: { height: 1, flex: 1, background: "rgba(255,255,255,0.10)" },
-  or: { fontSize: 12, opacity: 0.6, fontWeight: 800 },
-  form: { display: "grid", gap: 12, marginTop: 6 },
-  label: { display: "grid", gap: 6, fontSize: 12, fontWeight: 900, color: "rgba(255,255,255,0.80)" },
-  input: {
-    width: "100%",
-    borderRadius: 14,
-    border: "1px solid rgba(255,255,255,0.10)",
-    background: "rgba(0,0,0,0.28)",
-    padding: "10px 12px",
-    color: "#fff",
-    outline: "none",
-    fontSize: 14,
-  },
-  links: { marginTop: 14, display: "flex", justifyContent: "space-between", gap: 12 },
-  link: { color: "rgba(255,255,255,0.70)", textDecoration: "none", fontWeight: 850, fontSize: 13 },
-};

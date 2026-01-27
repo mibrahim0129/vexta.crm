@@ -4,7 +4,7 @@
 import Link from "next/link";
 import { Suspense, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { supabaseBrowser } from "@/lib/supabaseBrowser";
+import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 
 function GoogleIcon() {
   return (
@@ -32,7 +32,7 @@ function GoogleIcon() {
 function LoginInner() {
   const router = useRouter();
   const sp = useSearchParams();
-  const sb = useMemo(() => supabaseBrowser(), []);
+  const sb = useMemo(() => createSupabaseBrowserClient(), []);
 
   const redirectTo = useMemo(() => {
     const r = sp.get("redirectTo") || sp.get("next");
@@ -84,30 +84,19 @@ function LoginInner() {
       const origin = window.location.origin;
       const cb = `${origin}/auth/callback?next=${encodeURIComponent(redirectTo)}`;
 
-      // Force manual redirect so we KNOW we leave the site to Supabase/Google
-      const { data, error } = await sb.auth.signInWithOAuth({
+      const { error } = await sb.auth.signInWithOAuth({
         provider: "google",
         options: {
           redirectTo: cb,
           queryParams: { prompt: "select_account" },
-          skipBrowserRedirect: true,
         },
       });
 
       if (error) {
         setError(error.message || "Google sign-in failed.");
         setOauthLoading(false);
-        return;
       }
-
-      if (!data?.url) {
-        setError("Google sign-in failed: missing OAuth URL.");
-        setOauthLoading(false);
-        return;
-      }
-
-      // This MUST navigate to: https://<project>.supabase.co/auth/v1/authorize...
-      window.location.assign(data.url);
+      // success -> browser redirects away
     } catch (e) {
       setError(e?.message || "Google sign-in failed. Please try again.");
       setOauthLoading(false);
