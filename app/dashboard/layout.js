@@ -1,23 +1,39 @@
+// app/dashboard/layout.js
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { supabaseBrowser } from "@/lib/supabaseBrowser";
+import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 
 export default function DashboardLayout({ children }) {
   const pathname = usePathname();
-  const sb = useMemo(() => supabaseBrowser(), []);
+  const router = useRouter();
+
+  // Use the SAME client approach as login/signup
+  const sb = useMemo(() => createSupabaseBrowserClient(), []);
 
   const [email, setEmail] = useState("");
   const [collapsed, setCollapsed] = useState(false);
   const [q, setQ] = useState("");
 
   useEffect(() => {
+    let mounted = true;
+
     (async () => {
-      const { data } = await sb.auth.getSession();
-      setEmail(data?.session?.user?.email || "");
+      const { data } = await sb.auth.getUser();
+      if (!mounted) return;
+      setEmail(data?.user?.email || "");
     })();
+
+    const { data: sub } = sb.auth.onAuthStateChange((_event, session) => {
+      setEmail(session?.user?.email || "");
+    });
+
+    return () => {
+      mounted = false;
+      sub?.subscription?.unsubscribe?.();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -25,7 +41,8 @@ export default function DashboardLayout({ children }) {
     try {
       await sb.auth.signOut();
     } finally {
-      window.location.href = "/login";
+      router.replace("/login");
+      router.refresh();
     }
   }
 
