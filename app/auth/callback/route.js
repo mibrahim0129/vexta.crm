@@ -12,20 +12,24 @@ export async function GET(request) {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-  // If env is missing, never 500 — show a helpful login error
   if (!supabaseUrl || !supabaseAnonKey) {
-    return NextResponse.redirect(
-      new URL("/login?error=missing_supabase_env", reqUrl.origin)
+    return NextResponse.json(
+      { ok: false, error: "missing_supabase_env" },
+      { status: 500 }
     );
   }
 
-  // If no code, just go to next
   if (!code) {
-    return NextResponse.redirect(new URL(next, reqUrl.origin));
+    return NextResponse.json(
+      { ok: false, error: "missing_code", hint: "No ?code= in URL" },
+      { status: 400 }
+    );
   }
 
-  // Create the redirect response FIRST, and let Supabase write cookies onto it
-  const response = NextResponse.redirect(new URL(next, reqUrl.origin));
+  // We'll attach cookies to THIS response
+  const res = NextResponse.json({ ok: true, next });
+
+  const cookiesSet = [];
 
   try {
     const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
@@ -35,27 +39,29 @@ export async function GET(request) {
         },
         setAll(cookiesToSet) {
           cookiesToSet.forEach(({ name, value, options }) => {
-            response.cookies.set(name, value, options);
+            cookiesSet.push(name);
+            res.cookies.set(name, value, options);
           });
         },
       },
     });
 
-    const { error } = await supabase.auth.exchangeCodeForSession(code);
+    const { data, error } = await supabase.auth.exchangeCodeForSession(code);
 
-    if (error) {
-      // Put the real error in the URL so we can see it
-      const bad = new URL("/login", reqUrl.origin);
-      bad.searchParams.set("error", "oauth_exchange_failed");
-      bad.searchParams.set("message", error.message);
-      return NextResponse.redirect(bad);
-    }
-
-    return response;
+    return NextResponse.json({
+      ok: !error,
+      next,
+      exchangeError: error ? { message: error.message, name: error.name } : null,
+      sessionUser: data?.session?.user?.email || null,
+      cookiesSet,
+      cookieNamesInRequest: request.cookies.getAll().map((c) => c.name),
+      note:
+        "If exchangeError exists, fix Supabase Auth URL config / provider config. If ok=true but cookiesSet is empty, cookie write is failing.",
+    });
   } catch (e) {
-    const bad = new URL("/login", reqUrl.origin);
-    bad.searchParams.set("error", "callback_exception");
-    bad.searchParams.set("message", e?.message || "unknown");
-    return NextResponse.redirect(bad);
+    return NextResponse.json(
+      { ok: false, error: e?.message || "callback_exception", cookiesSet },
+      { status: 500 }
+    );
   }
 }
