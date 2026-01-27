@@ -70,7 +70,7 @@ function LoginInner() {
 
       router.refresh();
       router.push(redirectTo);
-    } catch (err) {
+    } catch {
       setError("Something went wrong. Please try again.");
       setLoading(false);
     }
@@ -84,7 +84,6 @@ function LoginInner() {
       const supabase = createSupabaseBrowserClient();
       const origin = window.location.origin;
 
-      // IMPORTANT: your existing callback uses ?next=
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: {
@@ -96,7 +95,7 @@ function LoginInner() {
         setError(error.message || "Google sign-in failed.");
         setOauthLoading(false);
       }
-    } catch (e) {
+    } catch {
       setError("Google sign-in failed. Please try again.");
       setOauthLoading(false);
     }
@@ -115,8 +114,8 @@ function LoginInner() {
 
           <h1 className="h1">Welcome back.</h1>
           <p className="p">
-            Log in to manage contacts, deals, tasks, notes, and calendar events — all linked,
-            fast, and clean.
+            Log in to manage contacts, deals, tasks, notes, and calendar events — all linked, fast,
+            and clean.
           </p>
 
           <div className="leftStack">
@@ -187,11 +186,7 @@ function LoginInner() {
                 />
               </label>
 
-              <button
-                type="submit"
-                className="btn btnGhost btnFull"
-                disabled={loading || oauthLoading}
-              >
+              <button type="submit" className="btn btnGhost btnFull" disabled={loading || oauthLoading}>
                 {loading ? "Logging in..." : "Log in"}
               </button>
             </form>
@@ -202,13 +197,11 @@ function LoginInner() {
             </div>
           </div>
 
-          <div className="fine">
-            By continuing, you agree to basic terms and privacy.
-          </div>
+          <div className="fine">By continuing, you agree to basic terms and privacy.</div>
         </div>
       </div>
 
-      <style jxs>{`
+      <style jsx>{`
         .page {
           min-height: 100vh;
           color: #fff;
@@ -220,9 +213,8 @@ function LoginInner() {
           position: fixed;
           inset: 0;
           z-index: -1;
-          background:
-            radial-gradient(1000px circle at 20% 10%, rgba(255, 255, 255, 0.12), transparent 60%),
-            radial-gradient(900px circle at 80% 35%, rgba(255, 255, 255, 0.10), transparent 55%),
+          background: radial-gradient(1000px circle at 20% 10%, rgba(255, 255, 255, 0.12), transparent 60%),
+            radial-gradient(900px circle at 80% 35%, rgba(255, 255, 255, 0.1), transparent 55%),
             linear-gradient(to bottom, #0a0a0a, #000);
         }
         .wrap {
@@ -234,7 +226,6 @@ function LoginInner() {
           display: grid;
           gap: 18px;
         }
-
         .brand {
           display: inline-flex;
           align-items: center;
@@ -253,7 +244,6 @@ function LoginInner() {
           font-weight: 900;
           letter-spacing: -0.4px;
         }
-
         .left {
           display: none;
         }
@@ -278,14 +268,13 @@ function LoginInner() {
         }
         .leftItem {
           border-radius: 16px;
-          border: 1px solid rgba(255, 255, 255, 0.10);
+          border: 1px solid rgba(255, 255, 255, 0.1);
           background: rgba(255, 255, 255, 0.06);
           padding: 12px 14px;
           color: rgba(255, 255, 255, 0.75);
           font-size: 14px;
           line-height: 1.35;
         }
-
         .right {
           display: grid;
           gap: 10px;
@@ -295,7 +284,7 @@ function LoginInner() {
           width: 100%;
           max-width: 460px;
           border-radius: 18px;
-          border: 1px solid rgba(255, 255, 255, 0.10);
+          border: 1px solid rgba(255, 255, 255, 0.1);
           background: rgba(255, 255, 255, 0.06);
           box-shadow: 0 30px 120px rgba(0, 0, 0, 0.55);
           padding: 18px;
@@ -318,14 +307,13 @@ function LoginInner() {
           margin-top: 12px;
           border-radius: 14px;
           border: 1px solid rgba(239, 68, 68, 0.35);
-          background: rgba(239, 68, 68, 0.10);
+          background: rgba(239, 68, 68, 0.1);
           color: #fecaca;
           padding: 12px;
           font-weight: 850;
           font-size: 13px;
           line-height: 1.35;
         }
-
         .orRow {
           margin: 14px 0;
           display: flex;
@@ -335,14 +323,13 @@ function LoginInner() {
         .line {
           height: 1px;
           flex: 1;
-          background: rgba(255, 255, 255, 0.10);
+          background: rgba(255, 255, 255, 0.1);
         }
         .or {
           font-size: 12px;
           color: rgba(255, 255, 255, 0.55);
           font-weight: 800;
         }
-
         .form {
           display: grid;
           gap: 12px;
@@ -353,12 +340,12 @@ function LoginInner() {
           gap: 6px;
           font-size: 12px;
           font-weight: 900;
-          color: rgba(255, 255, 255, 0.80);
+          color: rgba(255, 255, 255, 0.8);
         }
         .input {
           width: 100%;
           border-radius: 14px;
-          border: 1px solid rgba(255, 255, 255, 0.10);
+          border: 1px solid rgba(255, 255, 255, 0.1);
           background: rgba(0, 0, 0, 0.28);
           padding: 10px 12px;
           color: #fff;
@@ -368,7 +355,6 @@ function LoginInner() {
         .input::placeholder {
           color: rgba(255, 255, 255, 0.35);
         }
-
         .btn {
           display: inline-flex;
           align-items: center;
@@ -403,9 +389,8 @@ function LoginInner() {
           background: rgba(255, 255, 255, 0.92);
         }
         .btnGhost:hover {
-          background: rgba(255, 255, 255, 0.10);
+          background: rgba(255, 255, 255, 0.1);
         }
-
         .bottomLinks {
           margin-top: 14px;
           display: flex;
@@ -414,7 +399,7 @@ function LoginInner() {
           font-size: 13px;
         }
         .bottomLinks :global(a) {
-          color: rgba(255, 255, 255, 0.70);
+          color: rgba(255, 255, 255, 0.7);
           text-decoration: none;
           font-weight: 850;
         }
@@ -422,14 +407,12 @@ function LoginInner() {
           color: #fff;
           text-decoration: underline;
         }
-
         .fine {
           font-size: 12px;
           color: rgba(255, 255, 255, 0.45);
           text-align: center;
           max-width: 460px;
         }
-
         @media (min-width: 920px) {
           .layout {
             grid-template-columns: 1.05fr 0.95fr;
