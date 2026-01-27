@@ -208,7 +208,7 @@ function LoginInner() {
         </div>
       </div>
 
-      <style jsx>{`
+      <style jxs>{`
         .page {
           min-height: 100vh;
           color: #fff;

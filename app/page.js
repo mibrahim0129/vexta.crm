@@ -274,7 +274,7 @@ export default function HomePage() {
           <h2 className="h2">About Vexta</h2>
           <p className="p2">
             Vexta CRM is built to be practical: help agents follow up faster, keep deals
-            clean, and reduce chaos. The goal is simple — more action, less clutter.
+            clean, and reduce chaos. The goal is simple — more action, more results, less clutter.
           </p>
 
           <div className="cta">
