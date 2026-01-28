@@ -93,8 +93,11 @@ export async function POST(req) {
       customer: stripeCustomerId,
       line_items: [{ price: priceId, quantity: 1 }],
       allow_promotion_codes: true,
-      success_url: `${appUrl}/dashboard?billing=success`,
+
+      // ✅ IMPORTANT: sync after checkout, THEN send to dashboard
+      success_url: `${appUrl}/checkout/success?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${appUrl}/pricing?billing=canceled`,
+
       metadata: {
         supabase_user_id: user.id,
         selected_price_id: priceId,

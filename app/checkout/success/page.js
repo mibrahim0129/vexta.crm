@@ -27,8 +27,13 @@ export default function CheckoutSuccessPage() {
 
         const { data: sess } = await sb.auth.getSession();
         const accessToken = sess?.session?.access_token;
+
         if (!accessToken) {
-          router.replace(`/login?next=${encodeURIComponent(`/checkout/success?session_id=${sessionId}`)}`);
+          router.replace(
+            `/login?next=${encodeURIComponent(
+              `/checkout/success?session_id=${sessionId}`
+            )}`
+          );
           return;
         }
 
@@ -41,7 +46,7 @@ export default function CheckoutSuccessPage() {
           body: JSON.stringify({ session_id: sessionId }),
         });
 
-        const json = await res.json();
+        const json = await res.json().catch(() => ({}));
         if (!alive) return;
 
         if (!res.ok) {
@@ -67,7 +72,7 @@ export default function CheckoutSuccessPage() {
   return (
     <div style={{ maxWidth: 760, margin: "0 auto", padding: 24 }}>
       <h1 style={{ fontSize: 28, fontWeight: 950, marginBottom: 10 }}>
-        Checkout Success
+        You’re in ✅
       </h1>
       <p style={{ opacity: 0.85, marginBottom: 12 }}>{msg}</p>
       {detail ? (

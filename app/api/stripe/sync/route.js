@@ -27,34 +27,44 @@ function getBearerToken(req) {
 export async function POST(req) {
   try {
     const token = getBearerToken(req);
-    if (!token) return NextResponse.json({ error: "Missing auth token" }, { status: 401 });
-
-    const { session_id } = await req.json();
-    if (!session_id) return NextResponse.json({ error: "Missing session_id" }, { status: 400 });
-
-    const admin = supabaseAdmin();
-    const { data: userData, error: userErr } = await admin.auth.getUser(token);
-    const user = userData?.user;
-    if (userErr || !user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
-
-    const stripe = getStripe();
-
-    const checkout = await stripe.checkout.sessions.retrieve(session_id);
-    const stripeCustomerId = checkout.customer;
-    const stripeSubscriptionId = checkout.subscription;
-
-    if (!stripeCustomerId) {
-      return NextResponse.json({ error: "No Stripe customer on checkout session." }, { status: 400 });
+    if (!token) {
+      return NextResponse.json({ error: "Missing Authorization token" }, { status: 401 });
     }
 
-    // If subscription exists, pull details
-    let status = "none";
+    const { session_id } = await req.json().catch(() => ({}));
+    if (!session_id) {
+      return NextResponse.json({ error: "Missing session_id" }, { status: 400 });
+    }
+
+    const admin = supabaseAdmin();
+
+    // Verify user from token
+    const { data: userData, error: userErr } = await admin.auth.getUser(token);
+    const user = userData?.user;
+    if (userErr || !user) {
+      return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+    }
+
+    const stripe = getStripe();
+    const checkout = await stripe.checkout.sessions.retrieve(session_id);
+
+    const stripeCustomerId = checkout.customer ? String(checkout.customer) : null;
+    const stripeSubscriptionId = checkout.subscription ? String(checkout.subscription) : null;
+
+    if (!stripeCustomerId) {
+      return NextResponse.json(
+        { error: "No Stripe customer found on checkout session." },
+        { status: 400 }
+      );
+    }
+
+    let status = "incomplete";
     let price_id = null;
     let current_period_end = null;
 
     if (stripeSubscriptionId) {
       const sub = await stripe.subscriptions.retrieve(stripeSubscriptionId);
-      status = sub.status || "none";
+      status = sub.status || "incomplete";
       price_id = sub.items?.data?.[0]?.price?.id || null;
       current_period_end = sub.current_period_end
         ? new Date(sub.current_period_end * 1000).toISOString()
@@ -64,8 +74,8 @@ export async function POST(req) {
     await admin.from("subscriptions").upsert(
       {
         user_id: user.id,
-        stripe_customer_id: String(stripeCustomerId),
-        stripe_subscription_id: stripeSubscriptionId ? String(stripeSubscriptionId) : null,
+        stripe_customer_id: stripeCustomerId,
+        stripe_subscription_id: stripeSubscriptionId,
         status,
         price_id,
         current_period_end,
