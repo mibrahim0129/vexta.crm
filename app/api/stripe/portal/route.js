@@ -1,47 +1,83 @@
-// app/api/stripe/portal/route.js
+import Stripe from "stripe";
+import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
-import { getStripe } from "@/lib/stripe";
-import { supabaseAdmin } from "@/lib/supabase/admin";
+import { createClient } from "@supabase/supabase-js";
+import { createServerClient } from "@supabase/ssr";
 
-export async function POST(req) {
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
+  apiVersion: "2024-06-20",
+});
+
+function getAppUrl() {
+  return (
+    process.env.NEXT_PUBLIC_APP_URL ||
+    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000")
+  );
+}
+
+function supabaseAdmin() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !serviceKey) throw new Error("Missing Supabase admin env vars.");
+  return createClient(url, serviceKey, { auth: { persistSession: false } });
+}
+
+function supabaseServer() {
+  const cookieStore = cookies();
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!url || !anon) throw new Error("Missing Supabase public env vars.");
+  return createServerClient(url, anon, {
+    cookies: {
+      getAll() {
+        return cookieStore.getAll();
+      },
+      setAll(cookiesToSet) {
+        try {
+          cookiesToSet.forEach(({ name, value, options }) =>
+            cookieStore.set(name, value, options)
+          );
+        } catch {}
+      },
+    },
+  });
+}
+
+export async function POST() {
   try {
-    const stripe = getStripe();
-    if (!stripe) {
-      return NextResponse.json(
-        { error: "Missing STRIPE_SECRET_KEY env var" },
-        { status: 500 }
-      );
+    const sb = supabaseServer();
+    const {
+      data: { user },
+      error: userErr,
+    } = await sb.auth.getUser();
+
+    if (userErr || !user) {
+      return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
     }
 
-    const { user_id } = await req.json();
-    if (!user_id) return NextResponse.json({ error: "Missing user_id" }, { status: 400 });
-
-    const siteUrl = process.env.NEXT_PUBLIC_SITE_URL;
-    if (!siteUrl) return NextResponse.json({ error: "Missing NEXT_PUBLIC_SITE_URL" }, { status: 500 });
-
-    const sbAdmin = supabaseAdmin();
-
-    const { data, error } = await sbAdmin
-      .from("stripe_subscriptions")
+    const admin = supabaseAdmin();
+    const { data: row } = await admin
+      .from("subscriptions")
       .select("stripe_customer_id")
-      .eq("user_id", user_id)
+      .eq("user_id", user.id)
       .maybeSingle();
 
-    if (error) throw error;
-
-    const customerId = data?.stripe_customer_id;
-    if (!customerId) {
-      return NextResponse.json({ error: "No Stripe customer found for this user yet" }, { status: 404 });
+    if (!row?.stripe_customer_id) {
+      return NextResponse.json({ error: "No Stripe customer found" }, { status: 400 });
     }
 
+    const appUrl = getAppUrl();
+
     const session = await stripe.billingPortal.sessions.create({
-      customer: customerId,
-      return_url: `${siteUrl}/dashboard/billing`,
+      customer: row.stripe_customer_id,
+      return_url: `${appUrl}/dashboard/settings`,
     });
 
     return NextResponse.json({ url: session.url });
   } catch (e) {
-    console.error(e);
-    return NextResponse.json({ error: e.message || "Portal error" }, { status: 500 });
+    return NextResponse.json(
+      { error: e?.message || "Portal error" },
+      { status: 500 }
+    );
   }
 }
