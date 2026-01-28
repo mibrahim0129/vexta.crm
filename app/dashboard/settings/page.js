@@ -4,7 +4,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { supabaseBrowser } from "@/lib/supabase/browser"; // keep this path if it matches your project
+import { supabaseBrowser } from "@/lib/supabase/browser";
 
 export default function SettingsPage() {
   const router = useRouter();
@@ -38,7 +38,6 @@ export default function SettingsPage() {
       setUser(data.user);
       setLoading(false);
 
-      // Subscription row (optional—page still works without it)
       setSubLoading(true);
       const { data: subRow, error: subErr } = await sb
         .from("subscriptions")
@@ -53,7 +52,6 @@ export default function SettingsPage() {
       } else {
         setSubscription(subRow || null);
       }
-
       setSubLoading(false);
     }
 
@@ -64,7 +62,6 @@ export default function SettingsPage() {
     };
   }, [sb, router]);
 
-  // ✅ THIS is Step 4 — Manage Billing (Stripe portal)
   async function handleManageBilling() {
     setErr("");
     setBillingLoading(true);
@@ -78,15 +75,20 @@ export default function SettingsPage() {
 
       const res = await fetch("/api/stripe/portal", {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
+        headers: { Authorization: `Bearer ${token}` },
       });
 
       const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || "Failed to open billing portal");
-      if (!data?.url) throw new Error("Missing portal URL");
 
+      if (!res.ok) throw new Error(data?.error || "Failed to open billing portal");
+
+      // ✅ if user hasn't started checkout yet, send them to pricing
+      if (data?.needsCheckout) {
+        router.push("/pricing");
+        return;
+      }
+
+      if (!data?.url) throw new Error("Missing portal URL");
       window.location.href = data.url;
     } catch (e) {
       setErr(e?.message || "Something went wrong");
@@ -111,6 +113,25 @@ export default function SettingsPage() {
   const status = subscription?.status || null;
   const hasAccess = status === "active" || status === "trialing";
 
+  function statusLabel() {
+    if (!status) return "NONE";
+    return status.toUpperCase();
+  }
+
+  function accessLabel() {
+    if (hasAccess) return "ENABLED";
+    return "NOT ACTIVE";
+  }
+
+  function periodEndLabel() {
+    if (!subscription?.current_period_end) return "—";
+    try {
+      return new Date(subscription.current_period_end).toLocaleString();
+    } catch {
+      return subscription.current_period_end;
+    }
+  }
+
   return (
     <div style={{ maxWidth: 980, margin: "0 auto", padding: 24 }}>
       <div
@@ -126,7 +147,7 @@ export default function SettingsPage() {
         <div>
           <h1 style={{ fontSize: 30, fontWeight: 950, margin: 0 }}>Settings</h1>
           <p style={{ opacity: 0.75, marginTop: 8, marginBottom: 0 }}>
-            Manage your account and billing.
+            Account + billing.
           </p>
         </div>
 
@@ -197,20 +218,32 @@ export default function SettingsPage() {
 
         <Card title="Subscription">
           {subLoading ? (
-            <Muted>Loading subscription…</Muted>
+            <Muted>Loading…</Muted>
           ) : (
             <>
-              <Row label="Status" value={status ? status.toUpperCase() : "NONE"} />
-              <Row label="Access" value={hasAccess ? "ENABLED" : "NOT ACTIVE"} strong />
-              <Row
-                label="Renews / Ends"
-                value={
-                  subscription?.current_period_end
-                    ? new Date(subscription.current_period_end).toLocaleString()
-                    : "—"
-                }
-              />
+              <Row label="Status" value={statusLabel()} />
+              <Row label="Access" value={accessLabel()} strong />
+              <Row label="Renews / Ends" value={periodEndLabel()} />
               <Row label="Plan" value={subscription?.price_id || "—"} mono />
+
+              <div
+                style={{
+                  marginTop: 12,
+                  padding: 12,
+                  borderRadius: 14,
+                  border: "1px solid #e5e7eb",
+                  background: "#fafafa",
+                  fontWeight: 850,
+                }}
+              >
+                {!status
+                  ? "No subscription found yet. Start your trial to activate billing."
+                  : status === "trialing"
+                  ? "You’re in a trial right now. Cancel anytime before the trial ends to avoid charges."
+                  : status === "active"
+                  ? "Your subscription is active."
+                  : "Your subscription is not active. Manage billing or resubscribe."}
+              </div>
 
               <div style={{ display: "flex", gap: 10, marginTop: 12, flexWrap: "wrap" }}>
                 <button
@@ -243,6 +276,10 @@ export default function SettingsPage() {
                   View Pricing
                 </Link>
               </div>
+
+              <div style={{ marginTop: 10, fontSize: 12, opacity: 0.75 }}>
+                If you haven’t subscribed yet, “Manage Billing” will send you to pricing.
+              </div>
             </>
           )}
         </Card>
@@ -261,7 +298,9 @@ function Card({ title, children }) {
         background: "white",
       }}
     >
-      <div style={{ fontSize: 14, fontWeight: 950, marginBottom: 12 }}>{title}</div>
+      <div style={{ fontSize: 14, fontWeight: 950, marginBottom: 12 }}>
+        {title}
+      </div>
       {children}
     </div>
   );
