@@ -1,11 +1,11 @@
 // app/checkout/success/page.js
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabaseBrowser } from "@/lib/supabase/browser";
 
-export default function CheckoutSuccessPage() {
+function SuccessInner() {
   const router = useRouter();
   const sp = useSearchParams();
   const sb = useMemo(() => supabaseBrowser(), []);
@@ -90,5 +90,27 @@ export default function CheckoutSuccessPage() {
         </div>
       ) : null}
     </div>
+  );
+}
+
+export default function CheckoutSuccessPage() {
+  return (
+    <Suspense
+      fallback={
+        <div
+          style={{
+            minHeight: "100vh",
+            background: "#0b0b0b",
+            color: "white",
+            display: "grid",
+            placeItems: "center",
+          }}
+        >
+          <div style={{ fontWeight: 950, opacity: 0.9 }}>Loading…</div>
+        </div>
+      }
+    >
+      <SuccessInner />
+    </Suspense>
   );
 }
