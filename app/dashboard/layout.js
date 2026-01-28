@@ -4,45 +4,67 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { createSupabaseBrowserClient } from "@/lib/supabase/client";
+import { supabaseBrowser } from "@/lib/supabase/browser";
 
 export default function DashboardLayout({ children }) {
   const pathname = usePathname();
   const router = useRouter();
-  const sb = useMemo(() => createSupabaseBrowserClient(), []);
+  const sb = useMemo(() => supabaseBrowser(), []);
 
   const [email, setEmail] = useState("");
   const [collapsed, setCollapsed] = useState(false);
   const [q, setQ] = useState("");
 
+  const [authReady, setAuthReady] = useState(false);
+
   useEffect(() => {
-    let mounted = true;
+    let alive = true;
 
-    (async () => {
+    async function boot() {
+      // 1) Quick check
       const { data } = await sb.auth.getSession();
-      const session = data?.session;
+      if (!alive) return;
 
-      if (!session) {
-        const next = pathname ? pathname : "/dashboard";
-        router.replace(`/login?next=${encodeURIComponent(next)}`);
+      if (data?.session) {
+        setEmail(data.session.user?.email || "");
+        setAuthReady(true);
         return;
       }
 
-      if (!mounted) return;
-      setEmail(session.user?.email || "");
-    })();
+      // 2) Listen (OAuth callback may still be finalizing session storage)
+      const { data: sub } = sb.auth.onAuthStateChange((_event, session) => {
+        if (!alive) return;
 
-    const { data: sub } = sb.auth.onAuthStateChange((_event, session) => {
-      setEmail(session?.user?.email || "");
-      if (!session) {
+        setEmail(session?.user?.email || "");
+        if (session) {
+          setAuthReady(true);
+        }
+      });
+
+      // 3) Re-check after a short delay; only then redirect if still no session
+      setTimeout(async () => {
+        if (!alive) return;
+
+        const { data: again } = await sb.auth.getSession();
+        if (again?.session) {
+          setEmail(again.session.user?.email || "");
+          setAuthReady(true);
+          return;
+        }
+
         const next = pathname ? pathname : "/dashboard";
         router.replace(`/login?next=${encodeURIComponent(next)}`);
-      }
-    });
+      }, 400);
+
+      return () => sub?.subscription?.unsubscribe?.();
+    }
+
+    const cleanupPromise = boot();
 
     return () => {
-      mounted = false;
-      sub?.subscription?.unsubscribe?.();
+      alive = false;
+      // cleanup is handled by the returned unsubscribe (if any)
+      void cleanupPromise;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pathname]);
@@ -68,6 +90,15 @@ export default function DashboardLayout({ children }) {
   const filteredNav = nav.filter((n) =>
     n.label.toLowerCase().includes(q.trim().toLowerCase())
   );
+
+  // ✅ Important: prevent UI flash + redirect loop while auth hydrates
+  if (!authReady) {
+    return (
+      <div style={{ minHeight: "100vh", background: "#0b0b0b", color: "white", display: "grid", placeItems: "center" }}>
+        <div style={{ fontWeight: 950, opacity: 0.9 }}>Loading…</div>
+      </div>
+    );
+  }
 
   return (
     <div style={styles.shell}>
