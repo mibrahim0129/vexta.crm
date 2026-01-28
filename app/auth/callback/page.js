@@ -1,11 +1,11 @@
 // app/auth/callback/page.js
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabaseBrowser } from "@/lib/supabase/browser";
 
-export default function AuthCallbackPage() {
+function CallbackInner() {
   const router = useRouter();
   const sp = useSearchParams();
   const sb = useMemo(() => supabaseBrowser(), []);
@@ -29,6 +29,7 @@ export default function AuthCallbackPage() {
 
         if (typeof window !== "undefined") localStorage.removeItem("vexta_next");
 
+        // If a session already exists, go
         const { data: existing } = await sb.auth.getSession();
         if (!alive) return;
 
@@ -37,6 +38,7 @@ export default function AuthCallbackPage() {
           return;
         }
 
+        // If there’s a code param, exchange it for a session
         const code = sp.get("code");
         if (code) {
           const { data, error } = await sb.auth.exchangeCodeForSession(code);
@@ -86,5 +88,13 @@ export default function AuthCallbackPage() {
         </div>
       ) : null}
     </div>
+  );
+}
+
+export default function AuthCallbackPage() {
+  return (
+    <Suspense fallback={<div style={{ minHeight: "100vh", background: "#000" }} />}>
+      <CallbackInner />
+    </Suspense>
   );
 }
