@@ -18,12 +18,17 @@ export default function AuthCallbackPage() {
 
     async function run() {
       try {
-        // Supabase redirects back with either:
-        // - PKCE code in URL (most common), or
-        // - already set session (rare)
-        const next = sp.get("next") || "/dashboard";
+        const nextFromQuery = sp.get("next");
+        const nextFromStorage =
+          typeof window !== "undefined" ? localStorage.getItem("vexta_next") : null;
 
-        // If a session already exists, just go
+        const next =
+          (nextFromQuery && nextFromQuery.startsWith("/") ? nextFromQuery : null) ||
+          (nextFromStorage && nextFromStorage.startsWith("/") ? nextFromStorage : null) ||
+          "/dashboard";
+
+        if (typeof window !== "undefined") localStorage.removeItem("vexta_next");
+
         const { data: existing } = await sb.auth.getSession();
         if (!alive) return;
 
@@ -32,7 +37,6 @@ export default function AuthCallbackPage() {
           return;
         }
 
-        // If there’s a "code" param, exchange it for a session
         const code = sp.get("code");
         if (code) {
           const { data, error } = await sb.auth.exchangeCodeForSession(code);
@@ -45,7 +49,6 @@ export default function AuthCallbackPage() {
           return;
         }
 
-        // If no code and no session, something went wrong
         setMsg("Sign-in failed.");
         setDetail("Missing code/session. Please try logging in again.");
       } catch (e) {

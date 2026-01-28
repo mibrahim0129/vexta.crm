@@ -4,7 +4,7 @@
 import Link from "next/link";
 import { Suspense, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
+import { supabaseBrowser } from "@/lib/supabase/browser";
 
 function GoogleIcon() {
   return (
@@ -32,7 +32,7 @@ function GoogleIcon() {
 function LoginInner() {
   const router = useRouter();
   const sp = useSearchParams();
-  const sb = useMemo(() => createSupabaseBrowserClient(), []);
+  const sb = useMemo(() => supabaseBrowser(), []);
 
   const redirectTo = useMemo(() => {
     const r = sp.get("redirectTo") || sp.get("next");
@@ -67,8 +67,7 @@ function LoginInner() {
         return;
       }
 
-      router.refresh();
-      router.push(redirectTo);
+      router.replace(redirectTo);
     } catch {
       setError("Something went wrong. Please try again.");
     } finally {
@@ -81,8 +80,11 @@ function LoginInner() {
     setOauthLoading(true);
 
     try {
+      // Store where to go AFTER login (avoid query params on redirectTo)
+      localStorage.setItem("vexta_next", redirectTo);
+
       const origin = window.location.origin;
-      const cb = `${origin}/auth/callback?next=${encodeURIComponent(redirectTo)}`;
+      const cb = `${origin}/auth/callback`; // ✅ NO query params
 
       const { error } = await sb.auth.signInWithOAuth({
         provider: "google",
