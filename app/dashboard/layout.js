@@ -16,9 +16,42 @@ export default function DashboardLayout({ children }) {
   const [q, setQ] = useState("");
 
   const [authReady, setAuthReady] = useState(false);
+  const [accessReady, setAccessReady] = useState(false);
 
   useEffect(() => {
     let alive = true;
+    let unsubscribeAuth = null;
+
+    async function checkSubscription(userId) {
+      try {
+        const { data: subRow, error } = await sb
+          .from("subscriptions")
+          .select("status")
+          .eq("user_id", userId)
+          .maybeSingle();
+
+        if (!alive) return;
+
+        if (error) {
+          // If we can't read subscriptions, fail closed: push to pricing
+          router.replace("/pricing");
+          return;
+        }
+
+        const status = subRow?.status || "";
+        const hasAccess = status === "trialing" || status === "active";
+
+        if (!hasAccess) {
+          router.replace("/pricing");
+          return;
+        }
+
+        setAccessReady(true);
+      } catch {
+        if (!alive) return;
+        router.replace("/pricing");
+      }
+    }
 
     async function boot() {
       // 1) Quick check
@@ -26,20 +59,31 @@ export default function DashboardLayout({ children }) {
       if (!alive) return;
 
       if (data?.session) {
-        setEmail(data.session.user?.email || "");
+        const session = data.session;
+        setEmail(session.user?.email || "");
         setAuthReady(true);
+        await checkSubscription(session.user.id);
         return;
       }
 
       // 2) Listen (OAuth callback may still be finalizing session storage)
-      const { data: sub } = sb.auth.onAuthStateChange((_event, session) => {
+      const { data: sub } = sb.auth.onAuthStateChange(async (_event, session) => {
         if (!alive) return;
 
         setEmail(session?.user?.email || "");
+
         if (session) {
           setAuthReady(true);
+          await checkSubscription(session.user.id);
+          return;
         }
+
+        // Logged out -> go login
+        const next = pathname ? pathname : "/dashboard";
+        router.replace(`/login?next=${encodeURIComponent(next)}`);
       });
+
+      unsubscribeAuth = () => sub?.subscription?.unsubscribe?.();
 
       // 3) Re-check after a short delay; only then redirect if still no session
       setTimeout(async () => {
@@ -47,24 +91,23 @@ export default function DashboardLayout({ children }) {
 
         const { data: again } = await sb.auth.getSession();
         if (again?.session) {
-          setEmail(again.session.user?.email || "");
+          const session = again.session;
+          setEmail(session.user?.email || "");
           setAuthReady(true);
+          await checkSubscription(session.user.id);
           return;
         }
 
         const next = pathname ? pathname : "/dashboard";
         router.replace(`/login?next=${encodeURIComponent(next)}`);
       }, 400);
-
-      return () => sub?.subscription?.unsubscribe?.();
     }
 
-    const cleanupPromise = boot();
+    boot();
 
     return () => {
       alive = false;
-      // cleanup is handled by the returned unsubscribe (if any)
-      void cleanupPromise;
+      if (unsubscribeAuth) unsubscribeAuth();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pathname]);
@@ -91,11 +134,21 @@ export default function DashboardLayout({ children }) {
     n.label.toLowerCase().includes(q.trim().toLowerCase())
   );
 
-  // ✅ Important: prevent UI flash + redirect loop while auth hydrates
-  if (!authReady) {
+  // ✅ block UI until auth + subscription access are confirmed
+  if (!authReady || !accessReady) {
     return (
-      <div style={{ minHeight: "100vh", background: "#0b0b0b", color: "white", display: "grid", placeItems: "center" }}>
-        <div style={{ fontWeight: 950, opacity: 0.9 }}>Loading…</div>
+      <div
+        style={{
+          minHeight: "100vh",
+          background: "#0b0b0b",
+          color: "white",
+          display: "grid",
+          placeItems: "center",
+        }}
+      >
+        <div style={{ fontWeight: 950, opacity: 0.9 }}>
+          {authReady ? "Checking access…" : "Loading…"}
+        </div>
       </div>
     );
   }
