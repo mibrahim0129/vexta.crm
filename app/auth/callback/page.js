@@ -1,140 +1,87 @@
 // app/auth/callback/page.js
 "use client";
 
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
+import { supabaseBrowser } from "@/lib/supabase/browser";
 
 export default function AuthCallbackPage() {
-  return (
-    <Suspense fallback={<Fallback />}>
-      <Inner />
-    </Suspense>
-  );
-}
-
-function Fallback() {
-  return (
-    <main style={styles.page}>
-      <div style={styles.card}>
-        <h1 style={styles.h1}>Auth Callback</h1>
-        <p style={styles.p}>Finishing sign-in…</p>
-      </div>
-    </main>
-  );
-}
-
-function Inner() {
-  const sb = useMemo(() => createSupabaseBrowserClient(), []);
   const router = useRouter();
   const sp = useSearchParams();
+  const sb = useMemo(() => supabaseBrowser(), []);
 
-  const next = sp.get("next") || "/dashboard";
-  const code = sp.get("code");
-  const error = sp.get("error");
-  const errorDesc = sp.get("error_description");
-
-  const [msg, setMsg] = useState("Finishing sign-in…");
-  const [err, setErr] = useState("");
+  const [msg, setMsg] = useState("Finalizing sign-in…");
+  const [detail, setDetail] = useState("");
 
   useEffect(() => {
-    (async () => {
+    let alive = true;
+
+    async function run() {
       try {
-        if (error) {
-          setErr(`${error}${errorDesc ? `: ${errorDesc}` : ""}`);
-          setMsg("Sign-in failed.");
-          return;
-        }
+        // Supabase redirects back with either:
+        // - PKCE code in URL (most common), or
+        // - already set session (rare)
+        const next = sp.get("next") || "/dashboard";
 
-        // If Supabase already detected session from URL, we’re good.
-        const pre = await sb.auth.getSession();
-        if (pre?.data?.session) {
-          setMsg("Signed in! Redirecting…");
+        // If a session already exists, just go
+        const { data: existing } = await sb.auth.getSession();
+        if (!alive) return;
+
+        if (existing?.session) {
           router.replace(next);
-          router.refresh();
           return;
         }
 
-        if (!code) {
-          setErr("Missing code. Please try logging in again.");
-          setMsg("Sign-in failed.");
+        // If there’s a "code" param, exchange it for a session
+        const code = sp.get("code");
+        if (code) {
+          const { data, error } = await sb.auth.exchangeCodeForSession(code);
+          if (!alive) return;
+
+          if (error) throw error;
+          if (!data?.session) throw new Error("No session returned from code exchange.");
+
+          router.replace(next);
           return;
         }
 
-        const { error: exErr } = await sb.auth.exchangeCodeForSession(code);
-        if (exErr) throw exErr;
-
-        const { data } = await sb.auth.getSession();
-        if (!data?.session) {
-          setErr("No session found after login. Please try again.");
-          setMsg("Sign-in incomplete.");
-          return;
-        }
-
-        setMsg("Signed in! Redirecting…");
-        router.replace(next);
-        router.refresh();
-      } catch (e) {
-        console.error(e);
-        setErr(e?.message || "Callback failed");
+        // If no code and no session, something went wrong
         setMsg("Sign-in failed.");
+        setDetail("Missing code/session. Please try logging in again.");
+      } catch (e) {
+        if (!alive) return;
+        setMsg("Sign-in failed.");
+        setDetail(e?.message || "Please try logging in again.");
       }
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    }
+
+    run();
+    return () => {
+      alive = false;
+    };
+  }, [sb, router, sp]);
 
   return (
-    <main style={styles.page}>
-      <div style={styles.card}>
-        <h1 style={styles.h1}>Auth Callback</h1>
-        <p style={styles.p}>{msg}</p>
+    <div style={{ maxWidth: 720, margin: "0 auto", padding: 24 }}>
+      <h1 style={{ fontSize: 24, fontWeight: 900, marginBottom: 8 }}>
+        Auth Callback
+      </h1>
+      <p style={{ opacity: 0.8, marginBottom: 12 }}>{msg}</p>
 
-        {err ? <div style={styles.error}>{err}</div> : null}
-
-        <div style={styles.small}>
-          If you get stuck here, go to{" "}
-          <a href="/login" style={styles.link}>
-            /login
-          </a>{" "}
-          and try again.
+      {detail ? (
+        <div
+          style={{
+            border: "1px solid #fecaca",
+            background: "#fff1f2",
+            color: "#991b1b",
+            padding: 12,
+            borderRadius: 12,
+            fontWeight: 800,
+          }}
+        >
+          {detail}
         </div>
-      </div>
-    </main>
+      ) : null}
+    </div>
   );
 }
-
-const styles = {
-  page: {
-    minHeight: "100vh",
-    display: "grid",
-    placeItems: "center",
-    padding: 20,
-    background:
-      "radial-gradient(circle at top, rgba(255,255,255,0.08), rgba(0,0,0,1))",
-    color: "white",
-  },
-  card: {
-    width: "100%",
-    maxWidth: 780,
-    border: "1px solid rgba(255,255,255,0.12)",
-    background: "rgba(0,0,0,0.55)",
-    borderRadius: 18,
-    padding: 22,
-    boxShadow: "0 12px 40px rgba(0,0,0,0.45)",
-    backdropFilter: "blur(10px)",
-  },
-  h1: { margin: 0, fontSize: 34, letterSpacing: -0.6, fontWeight: 950 },
-  p: { marginTop: 10, opacity: 0.8, lineHeight: 1.4 },
-  error: {
-    marginTop: 12,
-    border: "1px solid rgba(239,68,68,0.35)",
-    background: "rgba(239,68,68,0.10)",
-    color: "#fecaca",
-    borderRadius: 12,
-    padding: 12,
-    fontWeight: 900,
-    lineHeight: 1.4,
-  },
-  small: { marginTop: 12, fontSize: 12, opacity: 0.75, lineHeight: 1.4 },
-  link: { color: "white", fontWeight: 900, textDecoration: "underline" },
-};
