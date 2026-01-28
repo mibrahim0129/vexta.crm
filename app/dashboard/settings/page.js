@@ -4,7 +4,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { supabaseBrowser } from "@/lib/supabase/browser"; // your standardized client
+import { supabaseBrowser } from "@/lib/supabase/browser"; // keep this path if it matches your project
 
 export default function SettingsPage() {
   const router = useRouter();
@@ -38,18 +38,17 @@ export default function SettingsPage() {
       setUser(data.user);
       setLoading(false);
 
-      // Fetch subscription (if table exists + RLS allows reading own row)
+      // Subscription row (optional—page still works without it)
       setSubLoading(true);
       const { data: subRow, error: subErr } = await sb
         .from("subscriptions")
-        .select("status, price_id, current_period_end, stripe_customer_id, stripe_subscription_id")
+        .select("status, price_id, current_period_end")
         .eq("user_id", data.user.id)
         .maybeSingle();
 
       if (!alive) return;
 
       if (subErr) {
-        // Don’t hard-fail settings page if RLS/table isn’t ready yet
         setSubscription(null);
       } else {
         setSubscription(subRow || null);
@@ -65,13 +64,26 @@ export default function SettingsPage() {
     };
   }, [sb, router]);
 
+  // ✅ THIS is Step 4 — Manage Billing (Stripe portal)
   async function handleManageBilling() {
     setErr("");
     setBillingLoading(true);
-    try {
-      const res = await fetch("/api/stripe/portal", { method: "POST" });
-      const data = await res.json();
 
+    try {
+      const { data: sessionData, error: sessionErr } = await sb.auth.getSession();
+      if (sessionErr) throw new Error(sessionErr.message);
+
+      const token = sessionData?.session?.access_token;
+      if (!token) throw new Error("You must be logged in.");
+
+      const res = await fetch("/api/stripe/portal", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      const data = await res.json();
       if (!res.ok) throw new Error(data?.error || "Failed to open billing portal");
       if (!data?.url) throw new Error("Missing portal URL");
 
@@ -85,6 +97,7 @@ export default function SettingsPage() {
   async function handleLogout() {
     setErr("");
     setLogoutLoading(true);
+
     try {
       const { error } = await sb.auth.signOut();
       if (error) throw new Error(error.message);
@@ -178,10 +191,6 @@ export default function SettingsPage() {
             <>
               <Row label="Email" value={user?.email || "—"} />
               <Row label="User ID" value={user?.id || "—"} mono />
-              <div style={{ marginTop: 12, fontSize: 12, opacity: 0.75 }}>
-                If you have issues logging in, confirm you’re using the same email
-                you subscribed with.
-              </div>
             </>
           )}
         </Card>
@@ -192,11 +201,7 @@ export default function SettingsPage() {
           ) : (
             <>
               <Row label="Status" value={status ? status.toUpperCase() : "NONE"} />
-              <Row
-                label="Access"
-                value={hasAccess ? "ENABLED" : "NOT ACTIVE"}
-                strong
-              />
+              <Row label="Access" value={hasAccess ? "ENABLED" : "NOT ACTIVE"} strong />
               <Row
                 label="Renews / Ends"
                 value={
@@ -206,23 +211,6 @@ export default function SettingsPage() {
                 }
               />
               <Row label="Plan" value={subscription?.price_id || "—"} mono />
-
-              <div
-                style={{
-                  marginTop: 12,
-                  padding: 12,
-                  borderRadius: 14,
-                  border: "1px solid #e5e7eb",
-                  background: "#fafafa",
-                  fontWeight: 850,
-                }}
-              >
-                {status === "trialing"
-                  ? "You’re currently in your trial. You won’t be charged until the trial ends."
-                  : status === "active"
-                  ? "Your subscription is active."
-                  : "No active subscription found. Subscribe to get access."}
-              </div>
 
               <div style={{ display: "flex", gap: 10, marginTop: 12, flexWrap: "wrap" }}>
                 <button
@@ -255,21 +243,9 @@ export default function SettingsPage() {
                   View Pricing
                 </Link>
               </div>
-
-              <div style={{ marginTop: 10, fontSize: 12, opacity: 0.75 }}>
-                Billing is managed securely through Stripe.
-              </div>
             </>
           )}
         </Card>
-      </div>
-
-      <div style={{ marginTop: 18, fontSize: 12, opacity: 0.7, lineHeight: 1.6 }}>
-        <div>
-          <strong>Note:</strong> If “Subscription” shows NONE but you just paid,
-          it usually means the webhook hasn’t synced yet, or your webhook secret /
-          endpoint isn’t configured.
-        </div>
       </div>
     </div>
   );
@@ -285,9 +261,7 @@ function Card({ title, children }) {
         background: "white",
       }}
     >
-      <div style={{ fontSize: 14, fontWeight: 950, marginBottom: 12 }}>
-        {title}
-      </div>
+      <div style={{ fontSize: 14, fontWeight: 950, marginBottom: 12 }}>{title}</div>
       {children}
     </div>
   );
@@ -308,7 +282,9 @@ function Row({ label, value, mono, strong }) {
       <div
         style={{
           fontWeight: strong ? 950 : 850,
-          fontFamily: mono ? "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" : "inherit",
+          fontFamily: mono
+            ? "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace"
+            : "inherit",
           wordBreak: "break-all",
           textAlign: "right",
         }}
