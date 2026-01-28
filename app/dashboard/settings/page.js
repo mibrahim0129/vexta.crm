@@ -1,185 +1,324 @@
+// app/dashboard/settings/page.js
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { supabaseBrowser } from "@/lib/supabase/browser";
+import { useRouter } from "next/navigation";
+import { supabaseBrowser } from "@/lib/supabase/browser"; // your standardized client
 
 export default function SettingsPage() {
+  const router = useRouter();
   const sb = useMemo(() => supabaseBrowser(), []);
 
   const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState("");
   const [user, setUser] = useState(null);
 
-  async function logout() {
-    try {
-      await sb.auth.signOut();
-    } finally {
-      window.location.href = "/login";
-    }
-  }
+  const [subLoading, setSubLoading] = useState(true);
+  const [subscription, setSubscription] = useState(null);
+
+  const [billingLoading, setBillingLoading] = useState(false);
+  const [logoutLoading, setLogoutLoading] = useState(false);
+  const [err, setErr] = useState("");
 
   useEffect(() => {
-    (async () => {
+    let alive = true;
+
+    async function load() {
       setErr("");
       setLoading(true);
 
-      try {
-        const { data, error } = await sb.auth.getUser();
-        if (error) throw error;
+      const { data, error } = await sb.auth.getUser();
+      if (!alive) return;
 
-        if (!data?.user) {
-          window.location.href = "/login?next=/dashboard/settings";
-          return;
-        }
-
-        setUser(data.user);
-      } catch (e) {
-        console.error(e);
-        setErr(e?.message || "Failed to load user");
-      } finally {
-        setLoading(false);
+      if (error || !data?.user) {
+        router.replace("/login");
+        return;
       }
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+
+      setUser(data.user);
+      setLoading(false);
+
+      // Fetch subscription (if table exists + RLS allows reading own row)
+      setSubLoading(true);
+      const { data: subRow, error: subErr } = await sb
+        .from("subscriptions")
+        .select("status, price_id, current_period_end, stripe_customer_id, stripe_subscription_id")
+        .eq("user_id", data.user.id)
+        .maybeSingle();
+
+      if (!alive) return;
+
+      if (subErr) {
+        // Don’t hard-fail settings page if RLS/table isn’t ready yet
+        setSubscription(null);
+      } else {
+        setSubscription(subRow || null);
+      }
+
+      setSubLoading(false);
+    }
+
+    load();
+
+    return () => {
+      alive = false;
+    };
+  }, [sb, router]);
+
+  async function handleManageBilling() {
+    setErr("");
+    setBillingLoading(true);
+    try {
+      const res = await fetch("/api/stripe/portal", { method: "POST" });
+      const data = await res.json();
+
+      if (!res.ok) throw new Error(data?.error || "Failed to open billing portal");
+      if (!data?.url) throw new Error("Missing portal URL");
+
+      window.location.href = data.url;
+    } catch (e) {
+      setErr(e?.message || "Something went wrong");
+      setBillingLoading(false);
+    }
+  }
+
+  async function handleLogout() {
+    setErr("");
+    setLogoutLoading(true);
+    try {
+      const { error } = await sb.auth.signOut();
+      if (error) throw new Error(error.message);
+      router.replace("/login");
+    } catch (e) {
+      setErr(e?.message || "Logout failed");
+      setLogoutLoading(false);
+    }
+  }
+
+  const status = subscription?.status || null;
+  const hasAccess = status === "active" || status === "trialing";
 
   return (
-    <div>
-      <div style={styles.header}>
+    <div style={{ maxWidth: 980, margin: "0 auto", padding: 24 }}>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          gap: 16,
+          alignItems: "center",
+          flexWrap: "wrap",
+          marginBottom: 18,
+        }}
+      >
         <div>
-          <h1 style={styles.h1}>Settings</h1>
-          <p style={styles.sub}>Account and app settings (we’ll expand this later).</p>
+          <h1 style={{ fontSize: 30, fontWeight: 950, margin: 0 }}>Settings</h1>
+          <p style={{ opacity: 0.75, marginTop: 8, marginBottom: 0 }}>
+            Manage your account and billing.
+          </p>
         </div>
 
-        <button onClick={logout} style={styles.btnDanger}>
-          Logout
-        </button>
+        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+          <Link
+            href="/dashboard"
+            style={{
+              padding: "9px 12px",
+              borderRadius: 12,
+              border: "1px solid #e5e7eb",
+              textDecoration: "none",
+              fontWeight: 800,
+            }}
+          >
+            Back
+          </Link>
+
+          <button
+            onClick={handleLogout}
+            disabled={logoutLoading}
+            style={{
+              padding: "9px 12px",
+              borderRadius: 12,
+              border: "1px solid #111",
+              background: "white",
+              fontWeight: 900,
+              cursor: logoutLoading ? "not-allowed" : "pointer",
+            }}
+          >
+            {logoutLoading ? "Logging out…" : "Logout"}
+          </button>
+        </div>
       </div>
 
-      {err ? <div style={styles.alert}>{err}</div> : null}
-
-      <div style={styles.grid}>
-        <div style={styles.card}>
-          <h2 style={styles.h2}>Account</h2>
-
-          {loading ? (
-            <div style={{ opacity: 0.75 }}>Loading…</div>
-          ) : !user ? (
-            <div style={{ opacity: 0.75 }}>Not signed in.</div>
-          ) : (
-            <div style={{ display: "grid", gap: 10 }}>
-              <Row label="Email" value={user.email || "-"} />
-              <Row label="User ID" value={user.id || "-"} />
-              <Row label="Provider" value={user.app_metadata?.provider || "-"} />
-              <Row
-                label="Last sign-in"
-                value={user.last_sign_in_at ? new Date(user.last_sign_in_at).toLocaleString() : "-"}
-              />
-              <div style={{ marginTop: 10, opacity: 0.7, fontSize: 12, lineHeight: 1.5 }}>
-                Your data is protected by Supabase Row Level Security (RLS). Only you can see your
-                contacts, deals, and notes.
-              </div>
-            </div>
-          )}
+      {err ? (
+        <div
+          style={{
+            border: "1px solid #fecaca",
+            background: "#fff1f2",
+            color: "#991b1b",
+            padding: 12,
+            borderRadius: 12,
+            marginBottom: 16,
+            fontWeight: 800,
+          }}
+        >
+          {err}
         </div>
+      ) : null}
 
-        <div style={styles.card}>
-          <h2 style={styles.h2}>App</h2>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
+          gap: 16,
+        }}
+      >
+        <Card title="Account">
+          {loading ? (
+            <Muted>Loading…</Muted>
+          ) : (
+            <>
+              <Row label="Email" value={user?.email || "—"} />
+              <Row label="User ID" value={user?.id || "—"} mono />
+              <div style={{ marginTop: 12, fontSize: 12, opacity: 0.75 }}>
+                If you have issues logging in, confirm you’re using the same email
+                you subscribed with.
+              </div>
+            </>
+          )}
+        </Card>
 
-          <div style={{ display: "grid", gap: 10 }}>
-            <Row label="Theme" value="Dark" />
-            <Row label="Realtime" value="Enabled" />
-            <div style={{ marginTop: 6, opacity: 0.7, fontSize: 12, lineHeight: 1.5 }}>
-              Coming soon:
-              <ul style={{ marginTop: 8, paddingLeft: 18 }}>
-                <li>Profile settings</li>
-                <li>Team accounts</li>
-                <li>Billing / subscriptions</li>
-                <li>Import / export</li>
-              </ul>
-            </div>
+        <Card title="Subscription">
+          {subLoading ? (
+            <Muted>Loading subscription…</Muted>
+          ) : (
+            <>
+              <Row label="Status" value={status ? status.toUpperCase() : "NONE"} />
+              <Row
+                label="Access"
+                value={hasAccess ? "ENABLED" : "NOT ACTIVE"}
+                strong
+              />
+              <Row
+                label="Renews / Ends"
+                value={
+                  subscription?.current_period_end
+                    ? new Date(subscription.current_period_end).toLocaleString()
+                    : "—"
+                }
+              />
+              <Row label="Plan" value={subscription?.price_id || "—"} mono />
 
-            <button onClick={logout} style={styles.btnGhost}>
-              Logout
-            </button>
-          </div>
+              <div
+                style={{
+                  marginTop: 12,
+                  padding: 12,
+                  borderRadius: 14,
+                  border: "1px solid #e5e7eb",
+                  background: "#fafafa",
+                  fontWeight: 850,
+                }}
+              >
+                {status === "trialing"
+                  ? "You’re currently in your trial. You won’t be charged until the trial ends."
+                  : status === "active"
+                  ? "Your subscription is active."
+                  : "No active subscription found. Subscribe to get access."}
+              </div>
+
+              <div style={{ display: "flex", gap: 10, marginTop: 12, flexWrap: "wrap" }}>
+                <button
+                  onClick={handleManageBilling}
+                  disabled={billingLoading}
+                  style={{
+                    padding: "11px 12px",
+                    borderRadius: 14,
+                    border: "1px solid #111",
+                    background: "#111",
+                    color: "white",
+                    fontWeight: 950,
+                    cursor: billingLoading ? "not-allowed" : "pointer",
+                  }}
+                >
+                  {billingLoading ? "Opening…" : "Manage Billing"}
+                </button>
+
+                <Link
+                  href="/pricing"
+                  style={{
+                    padding: "11px 12px",
+                    borderRadius: 14,
+                    border: "1px solid #111",
+                    background: "white",
+                    textDecoration: "none",
+                    fontWeight: 950,
+                  }}
+                >
+                  View Pricing
+                </Link>
+              </div>
+
+              <div style={{ marginTop: 10, fontSize: 12, opacity: 0.75 }}>
+                Billing is managed securely through Stripe.
+              </div>
+            </>
+          )}
+        </Card>
+      </div>
+
+      <div style={{ marginTop: 18, fontSize: 12, opacity: 0.7, lineHeight: 1.6 }}>
+        <div>
+          <strong>Note:</strong> If “Subscription” shows NONE but you just paid,
+          it usually means the webhook hasn’t synced yet, or your webhook secret /
+          endpoint isn’t configured.
         </div>
       </div>
     </div>
   );
 }
 
-function Row({ label, value }) {
+function Card({ title, children }) {
   return (
-    <div style={styles.row}>
-      <div style={styles.rowLabel}>{label}</div>
-      <div style={styles.rowValue} title={String(value)}>
+    <div
+      style={{
+        border: "1px solid #e5e7eb",
+        borderRadius: 18,
+        padding: 18,
+        background: "white",
+      }}
+    >
+      <div style={{ fontSize: 14, fontWeight: 950, marginBottom: 12 }}>
+        {title}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function Row({ label, value, mono, strong }) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        justifyContent: "space-between",
+        gap: 12,
+        padding: "8px 0",
+        borderBottom: "1px solid #f3f4f6",
+      }}
+    >
+      <div style={{ opacity: 0.7, fontWeight: 800 }}>{label}</div>
+      <div
+        style={{
+          fontWeight: strong ? 950 : 850,
+          fontFamily: mono ? "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" : "inherit",
+          wordBreak: "break-all",
+          textAlign: "right",
+        }}
+      >
         {value}
       </div>
     </div>
   );
 }
 
-const styles = {
-  header: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 },
-  h1: { margin: 0, fontSize: 28, fontWeight: 950 },
-  sub: { marginTop: 6, opacity: 0.75 },
-
-  grid: { marginTop: 16, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 },
-
-  card: { padding: 16, border: "1px solid #242424", borderRadius: 16, background: "#111111" },
-  h2: { margin: 0, fontSize: 18, fontWeight: 900 },
-
-  row: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    gap: 12,
-    padding: "10px 12px",
-    borderRadius: 12,
-    border: "1px solid #242424",
-    background: "#101010",
-  },
-  rowLabel: { opacity: 0.75, fontWeight: 900, fontSize: 13 },
-  rowValue: {
-    fontWeight: 950,
-    fontSize: 13,
-    maxWidth: 280,
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
-  },
-
-  btnDanger: {
-    padding: "10px 12px",
-    borderRadius: 999,
-    border: "1px solid rgba(239,68,68,0.35)",
-    background: "rgba(239,68,68,0.10)",
-    color: "#fecaca",
-    cursor: "pointer",
-    fontWeight: 950,
-    fontSize: 13,
-  },
-
-  btnGhost: {
-    padding: "10px 12px",
-    borderRadius: 12,
-    border: "1px solid rgba(255,255,255,0.16)",
-    background: "rgba(255,255,255,0.06)",
-    color: "white",
-    cursor: "pointer",
-    fontWeight: 950,
-    fontSize: 13,
-    width: "fit-content",
-  },
-
-  alert: {
-    marginTop: 14,
-    padding: 12,
-    borderRadius: 12,
-    background: "#1a0f0f",
-    border: "1px solid #5a1f1f",
-    color: "#ffd6d6",
-    fontWeight: 900,
-  },
-};
+function Muted({ children }) {
+  return <div style={{ opacity: 0.75, fontWeight: 700 }}>{children}</div>;
+}
