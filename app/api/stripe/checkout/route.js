@@ -1,15 +1,10 @@
-import Stripe from "stripe";
-import { cookies } from "next/headers";
+// app/api/stripe/checkout/route.js
 import { NextResponse } from "next/server";
+import Stripe from "stripe";
 import { createClient } from "@supabase/supabase-js";
-import { createServerClient } from "@supabase/ssr";
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
-  apiVersion: "2024-06-20",
-});
-
-const PRICE_MONTHLY = "price_1SuOMyA0KYJ0htSxcZPG0Vkg";
-const PRICE_YEARLY = "price_1SuOMyA0KYJ0htSxF9os18YO";
+const PRICE_MONTHLY = "price_1SuOMyA0KYJ0htSxcZPG0Vkg"; // 7-day trial
+const PRICE_YEARLY = "price_1SuOMyA0KYJ0htSxF9os18YO"; // no trial
 
 function getAppUrl() {
   return (
@@ -18,46 +13,32 @@ function getAppUrl() {
   );
 }
 
+function getStripe() {
+  const key = process.env.STRIPE_SECRET_KEY;
+  if (!key) throw new Error("Missing STRIPE_SECRET_KEY env var");
+  return new Stripe(key, { apiVersion: "2024-06-20" });
+}
+
 function supabaseAdmin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !serviceKey) throw new Error("Missing Supabase admin env vars.");
+  if (!url) throw new Error("Missing NEXT_PUBLIC_SUPABASE_URL env var");
+  if (!serviceKey) throw new Error("Missing SUPABASE_SERVICE_ROLE_KEY env var");
   return createClient(url, serviceKey, { auth: { persistSession: false } });
 }
 
-function supabaseServer() {
-  const cookieStore = cookies();
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!url || !anon) throw new Error("Missing Supabase public env vars.");
-  return createServerClient(url, anon, {
-    cookies: {
-      getAll() {
-        return cookieStore.getAll();
-      },
-      setAll(cookiesToSet) {
-        try {
-          cookiesToSet.forEach(({ name, value, options }) =>
-            cookieStore.set(name, value, options)
-          );
-        } catch {
-          // Route handlers can throw on set in some edge cases; safe to ignore.
-        }
-      },
-    },
-  });
+function getBearerToken(req) {
+  const auth = req.headers.get("authorization") || "";
+  const [type, token] = auth.split(" ");
+  if (type === "Bearer" && token) return token;
+  return null;
 }
 
 export async function POST(req) {
   try {
-    const sb = supabaseServer();
-    const {
-      data: { user },
-      error: userErr,
-    } = await sb.auth.getUser();
-
-    if (userErr || !user) {
-      return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+    const token = getBearerToken(req);
+    if (!token) {
+      return NextResponse.json({ error: "Missing Authorization token" }, { status: 401 });
     }
 
     const body = await req.json().catch(() => ({}));
@@ -67,10 +48,20 @@ export async function POST(req) {
       return NextResponse.json({ error: "Invalid priceId" }, { status: 400 });
     }
 
-    const appUrl = getAppUrl();
     const admin = supabaseAdmin();
 
-    // Get or create Stripe customer id for this user
+    // Verify user from token
+    const { data: userData, error: userErr } = await admin.auth.getUser(token);
+    const user = userData?.user;
+
+    if (userErr || !user) {
+      return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+    }
+
+    const stripe = getStripe();
+    const appUrl = getAppUrl();
+
+    // Get existing customer id if present
     const { data: subRow } = await admin
       .from("subscriptions")
       .select("stripe_customer_id")
@@ -86,7 +77,6 @@ export async function POST(req) {
       });
       stripeCustomerId = customer.id;
 
-      // Upsert record so portal + webhook always has a row
       await admin.from("subscriptions").upsert(
         {
           user_id: user.id,
@@ -105,7 +95,6 @@ export async function POST(req) {
       allow_promotion_codes: true,
       success_url: `${appUrl}/dashboard?billing=success`,
       cancel_url: `${appUrl}/pricing?billing=canceled`,
-      // IMPORTANT: link Stripe events back to your user
       metadata: {
         supabase_user_id: user.id,
         selected_price_id: priceId,
@@ -115,18 +104,14 @@ export async function POST(req) {
       },
     };
 
-    // Monthly gets 7-day trial; Yearly gets none
+    // Monthly gets 7-day trial; yearly gets none
     if (priceId === PRICE_MONTHLY) {
       sessionParams.subscription_data.trial_period_days = 7;
     }
 
     const session = await stripe.checkout.sessions.create(sessionParams);
-
     return NextResponse.json({ url: session.url });
   } catch (e) {
-    return NextResponse.json(
-      { error: e?.message || "Stripe checkout error" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: e?.message || "Stripe checkout error" }, { status: 500 });
   }
 }

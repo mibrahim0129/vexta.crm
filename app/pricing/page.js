@@ -3,12 +3,14 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
+import { supabaseBrowser } from "@/lib/supabase/browser";
 
 const PRICE_MONTHLY = "price_1SuOMyA0KYJ0htSxcZPG0Vkg";
 const PRICE_YEARLY = "price_1SuOMyA0KYJ0htSxF9os18YO";
 
 export default function PricingPage() {
-  const [loadingPlan, setLoadingPlan] = useState(""); // "monthly" | "yearly" | ""
+  const sb = useMemo(() => supabaseBrowser(), []);
+  const [loadingPlan, setLoadingPlan] = useState("");
   const [err, setErr] = useState("");
 
   const monthly = useMemo(
@@ -60,25 +62,27 @@ export default function PricingPage() {
     setLoadingPlan(planKey);
 
     try {
+      const { data: sessionData, error: sessionErr } = await sb.auth.getSession();
+      if (sessionErr) throw new Error(sessionErr.message);
+      const token = sessionData?.session?.access_token;
+      if (!token) throw new Error("You must be logged in to subscribe.");
+
       const res = await fetch("/api/stripe/checkout", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
         body: JSON.stringify({ priceId }),
       });
 
       const data = await res.json();
-
-      if (!res.ok) {
-        throw new Error(data?.error || "Failed to start checkout");
-      }
-
-      if (!data?.url) {
-        throw new Error("Missing checkout URL");
-      }
+      if (!res.ok) throw new Error(data?.error || "Failed to start checkout");
+      if (!data?.url) throw new Error("Missing checkout URL");
 
       window.location.href = data.url;
     } catch (e) {
-      setErr(e.message || "Something went wrong");
+      setErr(e?.message || "Something went wrong");
       setLoadingPlan("");
     }
   }
@@ -96,11 +100,9 @@ export default function PricingPage() {
         }}
       >
         <div>
-          <h1 style={{ fontSize: 34, fontWeight: 900, margin: 0 }}>
-            Vexta Pricing
-          </h1>
+          <h1 style={{ fontSize: 34, fontWeight: 900, margin: 0 }}>Vexta Pricing</h1>
           <p style={{ opacity: 0.8, marginTop: 8, marginBottom: 0 }}>
-            Simple pricing. One powerful CRM. Cancel anytime.
+            Simple pricing. Cancel anytime.
           </p>
         </div>
 
@@ -155,13 +157,10 @@ export default function PricingPage() {
 
       <div style={{ marginTop: 18, opacity: 0.85, lineHeight: 1.6 }}>
         <p style={{ marginBottom: 8 }}>
-          <strong>Trial:</strong> Monthly includes a{" "}
-          <strong>7-day free trial</strong>. You won’t be charged until the trial
-          ends. Cancel anytime before day 7 to avoid being charged.
+          <strong>Monthly:</strong> includes a <strong>7-day free trial</strong>. Cancel before day 7 to avoid charges.
         </p>
         <p style={{ margin: 0 }}>
-          <strong>Yearly:</strong> No trial — the yearly plan already includes{" "}
-          <strong>2 months free</strong> compared to monthly.
+          <strong>Yearly:</strong> no trial — you already get <strong>2 months free</strong> vs monthly.
         </p>
       </div>
 
@@ -182,32 +181,12 @@ function PlanCard({ plan, loading, onChoose }) {
         borderRadius: 18,
         padding: 18,
         boxShadow: plan.featured ? "0 12px 30px rgba(0,0,0,0.10)" : "none",
-        position: "relative",
-        overflow: "hidden",
         background: "white",
       }}
     >
-      <div
-        style={{
-          display: "flex",
-          alignItems: "baseline",
-          justifyContent: "space-between",
-          gap: 10,
-        }}
-      >
-        <h2 style={{ fontSize: 22, fontWeight: 900, margin: 0 }}>
-          {plan.label}
-        </h2>
-
-        <span
-          style={{
-            fontSize: 12,
-            padding: "4px 10px",
-            borderRadius: 999,
-            border: "1px solid #111",
-            fontWeight: 900,
-          }}
-        >
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10 }}>
+        <h2 style={{ fontSize: 22, fontWeight: 900, margin: 0 }}>{plan.label}</h2>
+        <span style={{ fontSize: 12, padding: "4px 10px", borderRadius: 999, border: "1px solid #111", fontWeight: 900 }}>
           {plan.badge}
         </span>
       </div>
@@ -218,35 +197,12 @@ function PlanCard({ plan, loading, onChoose }) {
           <div style={{ opacity: 0.7, fontWeight: 800 }}>{plan.sub}</div>
         </div>
 
-        <div
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 8,
-            marginTop: 10,
-            padding: "6px 10px",
-            borderRadius: 999,
-            border: "1px solid #111",
-            fontWeight: 950,
-            letterSpacing: 0.2,
-          }}
-        >
+        <div style={{ display: "inline-flex", alignItems: "center", gap: 8, marginTop: 10, padding: "6px 10px", borderRadius: 999, border: "1px solid #111", fontWeight: 950 }}>
           {plan.kicker}
         </div>
-        <div style={{ opacity: 0.75, marginTop: 6, fontWeight: 700 }}>
-          {plan.kickerNote}
-        </div>
+        <div style={{ opacity: 0.75, marginTop: 6, fontWeight: 700 }}>{plan.kickerNote}</div>
 
-        <div
-          style={{
-            marginTop: 12,
-            padding: 12,
-            borderRadius: 14,
-            border: "1px solid #e5e7eb",
-            background: "#fafafa",
-            fontWeight: 900,
-          }}
-        >
+        <div style={{ marginTop: 12, padding: 12, borderRadius: 14, border: "1px solid #e5e7eb", background: "#fafafa", fontWeight: 900 }}>
           {plan.highlight}
         </div>
       </div>
@@ -276,11 +232,6 @@ function PlanCard({ plan, loading, onChoose }) {
       >
         {loading ? "Redirecting…" : plan.cta}
       </button>
-
-      <div style={{ marginTop: 10, fontSize: 12, opacity: 0.75 }}>
-        By continuing, you agree to our billing terms. You can manage or cancel
-        your subscription anytime from Settings.
-      </div>
     </div>
   );
 }
