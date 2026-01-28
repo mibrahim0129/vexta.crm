@@ -39,7 +39,6 @@ export async function POST(req) {
     }
 
     const admin = supabaseAdmin();
-
     const { data: userData, error: userErr } = await admin.auth.getUser(token);
     const user = userData?.user;
 
@@ -47,14 +46,19 @@ export async function POST(req) {
       return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
     }
 
-    const { data: row } = await admin
+    const { data: row, error: rowErr } = await admin
       .from("subscriptions")
       .select("stripe_customer_id")
       .eq("user_id", user.id)
       .maybeSingle();
 
+    if (rowErr) {
+      return NextResponse.json({ error: rowErr.message }, { status: 500 });
+    }
+
+    // ✅ If they haven't started checkout yet, they have no customer id
     if (!row?.stripe_customer_id) {
-      return NextResponse.json({ error: "No Stripe customer found" }, { status: 400 });
+      return NextResponse.json({ needsCheckout: true }, { status: 200 });
     }
 
     const stripe = getStripe();
