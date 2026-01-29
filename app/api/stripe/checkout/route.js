@@ -61,14 +61,32 @@ export async function POST(req) {
     const stripe = getStripe();
     const appUrl = getAppUrl();
 
-    // Get existing customer id if present
-    const { data: subRow } = await admin
+    // Fetch the LATEST subscription row for this user (prevents grabbing wrong/old row)
+    const { data: subs, error: subsErr } = await admin
       .from("subscriptions")
-      .select("stripe_customer_id")
+      .select("status, stripe_customer_id, stripe_subscription_id, created_at")
       .eq("user_id", user.id)
-      .maybeSingle();
+      .order("created_at", { ascending: false })
+      .limit(1);
 
-    let stripeCustomerId = subRow?.stripe_customer_id || null;
+    if (subsErr) {
+      return NextResponse.json({ error: "Failed to read subscription" }, { status: 500 });
+    }
+
+    const latest = subs?.[0] || null;
+
+    // If they already have access, do NOT create another subscription — send to billing portal
+    const okStatuses = new Set(["active", "trialing", "past_due"]);
+    if (latest?.status && okStatuses.has(latest.status) && latest?.stripe_customer_id) {
+      const portal = await stripe.billingPortal.sessions.create({
+        customer: latest.stripe_customer_id,
+        return_url: `${appUrl}/dashboard/settings?billing=portal_return`,
+      });
+      return NextResponse.json({ url: portal.url, kind: "portal" });
+    }
+
+    // Determine Stripe customer id
+    let stripeCustomerId = latest?.stripe_customer_id || null;
 
     if (!stripeCustomerId) {
       const customer = await stripe.customers.create({
@@ -77,15 +95,21 @@ export async function POST(req) {
       });
       stripeCustomerId = customer.id;
 
-      await admin.from("subscriptions").upsert(
-        {
-          user_id: user.id,
-          stripe_customer_id: stripeCustomerId,
-          status: "incomplete",
-          price_id: priceId,
-        },
-        { onConflict: "user_id" }
-      );
+      // Store customer id so future checkouts/portal work.
+      // NOTE: This is a pragmatic approach with your current schema.
+      // Long-term, we should move stripe_customer_id to a dedicated "customers" table.
+      await admin
+        .from("subscriptions")
+        .upsert(
+          {
+            user_id: user.id,
+            stripe_customer_id: stripeCustomerId,
+            // Do NOT force a fake "subscription" state here; just keep a placeholder.
+            status: latest?.status || "incomplete",
+            price_id: priceId,
+          },
+          { onConflict: "user_id" }
+        );
     }
 
     const sessionParams = {
@@ -94,8 +118,8 @@ export async function POST(req) {
       line_items: [{ price: priceId, quantity: 1 }],
       allow_promotion_codes: true,
 
-      // ✅ IMPORTANT: sync after checkout, THEN send to dashboard
-      success_url: `${appUrl}/checkout/success?session_id={CHECKOUT_SESSION_ID}`,
+      // ✅ send to a success buffer page (prevents redirect loops while webhook finalizes)
+      success_url: `${appUrl}/billing/success?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${appUrl}/pricing?billing=canceled`,
 
       metadata: {
@@ -113,7 +137,7 @@ export async function POST(req) {
     }
 
     const session = await stripe.checkout.sessions.create(sessionParams);
-    return NextResponse.json({ url: session.url });
+    return NextResponse.json({ url: session.url, kind: "checkout" });
   } catch (e) {
     return NextResponse.json({ error: e?.message || "Stripe checkout error" }, { status: 500 });
   }
