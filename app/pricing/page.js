@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabaseBrowser } from "@/lib/supabase/browser";
+import Footer from "@/app/components/Footer";
 
 const PRICE_MONTHLY = "price_1SuOMyA0KYJ0htSxcZPG0Vkg";
 const PRICE_YEARLY = "price_1SuOMyA0KYJ0htSxF9os18YO";
@@ -175,6 +176,10 @@ export default function PricingPage() {
         <Link href="/dashboard" style={{ textDecoration: "underline" }}>
           Back to dashboard
         </Link>
+      </div>
+
+      <div style={{ marginTop: 26 }}>
+        <Footer variant="light" />
       </div>
     </div>
   );
