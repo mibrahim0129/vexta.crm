@@ -1,6 +1,9 @@
+// app/contact/page.js
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
+import Footer from "@/app/components/Footer";
 
 export default function Contact() {
   const [sent, setSent] = useState(false);
@@ -11,7 +14,15 @@ export default function Contact() {
   }
 
   return (
-    <main style={{ padding: 40, fontFamily: "Arial", maxWidth: 700 }}>
+    <main
+      style={{
+        padding: 40,
+        fontFamily: "Arial",
+        maxWidth: 700,
+        marginLeft: "auto",
+        marginRight: "auto",
+      }}
+    >
       <h1>Contact</h1>
 
       {sent ? (
@@ -64,6 +75,14 @@ export default function Contact() {
           </button>
         </form>
       )}
+
+      <div style={{ marginTop: 18 }}>
+        <Link href="/pricing" style={{ textDecoration: "underline", fontWeight: 700 }}>
+          Back to Pricing
+        </Link>
+      </div>
+
+      <Footer variant="light" />
     </main>
   );
 }
