@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Suspense, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabaseBrowser } from "@/lib/supabase/browser";
+import Footer from "@/app/components/Footer";
 
 function GoogleIcon() {
   return (
@@ -203,10 +204,26 @@ function LoginInner() {
               <Link href="/signup">Create an account</Link>
               <Link href="/">Back to home</Link>
             </div>
+
+            <div className="legalLinks">
+              <Link href="/terms">Terms</Link>
+              <span className="dot">•</span>
+              <Link href="/privacy">Privacy</Link>
+              <span className="dot">•</span>
+              <Link href="/refunds">Refunds</Link>
+            </div>
           </div>
 
-          <div className="fine">By continuing, you agree to basic terms and privacy.</div>
+          <div className="fine">
+            By continuing, you agree to our{" "}
+            <Link href="/terms">Terms</Link> and{" "}
+            <Link href="/privacy">Privacy Policy</Link>.
+          </div>
         </div>
+      </div>
+
+      <div className="footerWrap">
+        <Footer variant="dark" />
       </div>
 
       <style jsx>{`
@@ -402,11 +419,40 @@ function LoginInner() {
           text-decoration: none;
           font-weight: 850;
         }
+        .legalLinks {
+          margin-top: 12px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+          font-size: 12px;
+          opacity: 0.9;
+        }
+        .legalLinks :global(a) {
+          color: rgba(255, 255, 255, 0.65);
+          text-decoration: none;
+          font-weight: 850;
+        }
+        .dot {
+          opacity: 0.35;
+          font-weight: 900;
+        }
         .fine {
           font-size: 12px;
           color: rgba(255, 255, 255, 0.45);
           text-align: center;
           max-width: 460px;
+        }
+        .fine :global(a) {
+          color: rgba(255, 255, 255, 0.7);
+          text-decoration: none;
+          font-weight: 850;
+        }
+        .footerWrap {
+          width: 100%;
+          max-width: 1120px;
+          padding: 0 18px 22px;
+          margin-top: 6px;
         }
         @media (min-width: 920px) {
           .layout {
