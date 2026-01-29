@@ -3,6 +3,8 @@ import { NextResponse } from "next/server";
 import Stripe from "stripe";
 import { createClient } from "@supabase/supabase-js";
 
+export const runtime = "nodejs";
+
 function getStripe() {
   const key = process.env.STRIPE_SECRET_KEY;
   if (!key) throw new Error("Missing STRIPE_SECRET_KEY env var");
@@ -39,6 +41,8 @@ export async function POST(req) {
     }
 
     const admin = supabaseAdmin();
+
+    // Verify user from token
     const { data: userData, error: userErr } = await admin.auth.getUser(token);
     const user = userData?.user;
 
@@ -46,28 +50,49 @@ export async function POST(req) {
       return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
     }
 
-    const { data: row, error: rowErr } = await admin
+    // IMPORTANT: avoid maybeSingle() if duplicates exist; always take latest row
+    const { data: rows, error: rowErr } = await admin
       .from("subscriptions")
-      .select("stripe_customer_id")
+      .select("stripe_customer_id, created_at")
       .eq("user_id", user.id)
-      .maybeSingle();
+      .order("created_at", { ascending: false })
+      .limit(1);
 
     if (rowErr) {
       return NextResponse.json({ error: rowErr.message }, { status: 500 });
     }
 
-    // ✅ If they haven't started checkout yet, they have no customer id
-    if (!row?.stripe_customer_id) {
-      return NextResponse.json({ needsCheckout: true }, { status: 200 });
-    }
+    let stripeCustomerId = rows?.[0]?.stripe_customer_id || null;
 
     const stripe = getStripe();
-    const session = await stripe.billingPortal.sessions.create({
-      customer: row.stripe_customer_id,
-      return_url: `${getAppUrl()}/dashboard/settings`,
+
+    // If missing, create customer so portal always works
+    if (!stripeCustomerId) {
+      const customer = await stripe.customers.create({
+        email: user.email ?? undefined,
+        metadata: { supabase_user_id: user.id },
+      });
+      stripeCustomerId = customer.id;
+
+      // Store for future portal/checkout usage
+      await admin
+        .from("subscriptions")
+        .upsert(
+          {
+            user_id: user.id,
+            stripe_customer_id: stripeCustomerId,
+            status: "incomplete",
+          },
+          { onConflict: "user_id" }
+        );
+    }
+
+    const portal = await stripe.billingPortal.sessions.create({
+      customer: stripeCustomerId,
+      return_url: `${getAppUrl()}/dashboard/settings?billing=portal_return`,
     });
 
-    return NextResponse.json({ url: session.url });
+    return NextResponse.json({ url: portal.url });
   } catch (e) {
     return NextResponse.json({ error: e?.message || "Portal error" }, { status: 500 });
   }
