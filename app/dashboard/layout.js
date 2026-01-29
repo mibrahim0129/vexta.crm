@@ -17,40 +17,51 @@ export default function DashboardLayout({ children }) {
 
   const [authReady, setAuthReady] = useState(false);
   const [accessReady, setAccessReady] = useState(false);
+  const [gateError, setGateError] = useState("");
 
   useEffect(() => {
     let alive = true;
     let unsubscribeAuth = null;
 
-    async function checkSubscription(userId) {
-      try {
-        const { data: subRow, error } = await sb
-          .from("subscriptions")
-          .select("status")
-          .eq("user_id", userId)
-          .maybeSingle();
+    const okStatuses = new Set(["active", "trialing", "past_due"]); // remove past_due if you don't want grace
 
-        if (!alive) return;
+    async function fetchBestSubscriptionStatus(userId) {
+      // IMPORTANT: you said you have multiple rows sometimes.
+      // Do NOT use maybeSingle() without ordering; grab the latest row.
+      const { data, error } = await sb
+        .from("subscriptions")
+        .select("status, created_at")
+        .eq("user_id", userId)
+        .order("created_at", { ascending: false })
+        .limit(1);
 
-        if (error) {
-          // If we can't read subscriptions, fail closed: push to pricing
-          router.replace("/pricing");
-          return;
-        }
+      if (error) return { status: null, error };
+      const status = data?.[0]?.status || null;
+      return { status, error: null };
+    }
 
-        const status = subRow?.status || "";
-        const hasAccess = status === "trialing" || status === "active";
+    async function checkAccess(userId) {
+      setGateError("");
+      setAccessReady(false);
 
-        if (!hasAccess) {
-          router.replace("/pricing");
-          return;
-        }
+      const { status, error } = await fetchBestSubscriptionStatus(userId);
 
-        setAccessReady(true);
-      } catch {
-        if (!alive) return;
-        router.replace("/pricing");
+      if (!alive) return;
+
+      if (error) {
+        // Don't redirect on a transient read error; show a clear message.
+        setGateError(
+          "We couldn’t verify your subscription right now. Please refresh in a moment."
+        );
+        return;
       }
+
+      if (!status || !okStatuses.has(status)) {
+        router.replace("/pricing");
+        return;
+      }
+
+      setAccessReady(true);
     }
 
     async function boot() {
@@ -62,7 +73,7 @@ export default function DashboardLayout({ children }) {
         const session = data.session;
         setEmail(session.user?.email || "");
         setAuthReady(true);
-        await checkSubscription(session.user.id);
+        await checkAccess(session.user.id);
         return;
       }
 
@@ -74,7 +85,7 @@ export default function DashboardLayout({ children }) {
 
         if (session) {
           setAuthReady(true);
-          await checkSubscription(session.user.id);
+          await checkAccess(session.user.id);
           return;
         }
 
@@ -94,7 +105,7 @@ export default function DashboardLayout({ children }) {
           const session = again.session;
           setEmail(session.user?.email || "");
           setAuthReady(true);
-          await checkSubscription(session.user.id);
+          await checkAccess(session.user.id);
           return;
         }
 
@@ -144,10 +155,36 @@ export default function DashboardLayout({ children }) {
           color: "white",
           display: "grid",
           placeItems: "center",
+          padding: 24,
         }}
       >
-        <div style={{ fontWeight: 950, opacity: 0.9 }}>
-          {authReady ? "Checking access…" : "Loading…"}
+        <div style={{ textAlign: "center", maxWidth: 520 }}>
+          <div style={{ fontWeight: 950, opacity: 0.9, fontSize: 16 }}>
+            {authReady ? "Checking access…" : "Loading…"}
+          </div>
+
+          {gateError ? (
+            <>
+              <div style={{ marginTop: 10, opacity: 0.8, fontWeight: 700 }}>
+                {gateError}
+              </div>
+              <button
+                onClick={() => window.location.reload()}
+                style={{
+                  marginTop: 14,
+                  padding: "10px 14px",
+                  borderRadius: 12,
+                  border: "1px solid rgba(255,255,255,0.16)",
+                  background: "rgba(255,255,255,0.06)",
+                  color: "white",
+                  fontWeight: 900,
+                  cursor: "pointer",
+                }}
+              >
+                Refresh
+              </button>
+            </>
+          ) : null}
         </div>
       </div>
     );
