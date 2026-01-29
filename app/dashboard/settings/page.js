@@ -3,11 +3,30 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { supabaseBrowser } from "@/lib/supabase/browser";
+
+const PRICE_MONTHLY = "price_1SuOMyA0KYJ0htSxcZPG0Vkg";
+const PRICE_YEARLY = "price_1SuOMyA0KYJ0htSxF9os18YO";
+
+function planName(priceId) {
+  if (priceId === PRICE_MONTHLY) return "Monthly";
+  if (priceId === PRICE_YEARLY) return "Yearly";
+  return "Unknown";
+}
+
+function formatPeriodEnd(iso) {
+  if (!iso) return "—";
+  try {
+    return new Date(iso).toLocaleString();
+  } catch {
+    return iso;
+  }
+}
 
 export default function SettingsPage() {
   const router = useRouter();
+  const sp = useSearchParams();
   const sb = useMemo(() => supabaseBrowser(), []);
 
   const [loading, setLoading] = useState(true);
@@ -19,6 +38,8 @@ export default function SettingsPage() {
   const [billingLoading, setBillingLoading] = useState(false);
   const [logoutLoading, setLogoutLoading] = useState(false);
   const [err, setErr] = useState("");
+
+  const billingReturned = sp?.get("billing") === "portal_return";
 
   useEffect(() => {
     let alive = true;
@@ -39,19 +60,23 @@ export default function SettingsPage() {
       setLoading(false);
 
       setSubLoading(true);
-      const { data: subRow, error: subErr } = await sb
+
+      // IMPORTANT: don't use maybeSingle() (duplicates or multiple rows can exist)
+      const { data: rows, error: subErr } = await sb
         .from("subscriptions")
-        .select("status, price_id, current_period_end")
+        .select("status, price_id, current_period_end, created_at")
         .eq("user_id", data.user.id)
-        .maybeSingle();
+        .order("created_at", { ascending: false })
+        .limit(1);
 
       if (!alive) return;
 
       if (subErr) {
         setSubscription(null);
       } else {
-        setSubscription(subRow || null);
+        setSubscription(rows?.[0] || null);
       }
+
       setSubLoading(false);
     }
 
@@ -78,11 +103,11 @@ export default function SettingsPage() {
         headers: { Authorization: `Bearer ${token}` },
       });
 
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
 
       if (!res.ok) throw new Error(data?.error || "Failed to open billing portal");
 
-      // ✅ if user hasn't started checkout yet, send them to pricing
+      // If you kept old behavior somewhere else, still support it
       if (data?.needsCheckout) {
         router.push("/pricing");
         return;
@@ -111,11 +136,11 @@ export default function SettingsPage() {
   }
 
   const status = subscription?.status || null;
-  const hasAccess = status === "active" || status === "trialing";
+  const hasAccess = status === "active" || status === "trialing" || status === "past_due";
 
   function statusLabel() {
     if (!status) return "NONE";
-    return status.toUpperCase();
+    return String(status).toUpperCase();
   }
 
   function accessLabel() {
@@ -123,88 +148,41 @@ export default function SettingsPage() {
     return "NOT ACTIVE";
   }
 
-  function periodEndLabel() {
-    if (!subscription?.current_period_end) return "—";
-    try {
-      return new Date(subscription.current_period_end).toLocaleString();
-    } catch {
-      return subscription.current_period_end;
-    }
-  }
+  const plan = planName(subscription?.price_id);
+  const renews = formatPeriodEnd(subscription?.current_period_end);
 
   return (
-    <div style={{ maxWidth: 980, margin: "0 auto", padding: 24 }}>
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          gap: 16,
-          alignItems: "center",
-          flexWrap: "wrap",
-          marginBottom: 18,
-        }}
-      >
+    <div style={{ maxWidth: 980, margin: "0 auto", padding: 18 }}>
+      <div style={styles.header}>
         <div>
-          <h1 style={{ fontSize: 30, fontWeight: 950, margin: 0 }}>Settings</h1>
-          <p style={{ opacity: 0.75, marginTop: 8, marginBottom: 0 }}>
-            Account + billing.
-          </p>
+          <h1 style={styles.h1}>Settings</h1>
+          <p style={styles.hint}>Account + billing</p>
         </div>
 
         <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-          <Link
-            href="/dashboard"
-            style={{
-              padding: "9px 12px",
-              borderRadius: 12,
-              border: "1px solid #e5e7eb",
-              textDecoration: "none",
-              fontWeight: 800,
-            }}
-          >
+          <Link href="/dashboard" style={styles.btnGhost}>
             Back
           </Link>
 
           <button
             onClick={handleLogout}
             disabled={logoutLoading}
-            style={{
-              padding: "9px 12px",
-              borderRadius: 12,
-              border: "1px solid #111",
-              background: "white",
-              fontWeight: 900,
-              cursor: logoutLoading ? "not-allowed" : "pointer",
-            }}
+            style={{ ...styles.btn, ...styles.btnDanger }}
           >
             {logoutLoading ? "Logging out…" : "Logout"}
           </button>
         </div>
       </div>
 
-      {err ? (
-        <div
-          style={{
-            border: "1px solid #fecaca",
-            background: "#fff1f2",
-            color: "#991b1b",
-            padding: 12,
-            borderRadius: 12,
-            marginBottom: 16,
-            fontWeight: 800,
-          }}
-        >
-          {err}
+      {billingReturned ? (
+        <div style={styles.notice}>
+          Billing portal closed. If you changed anything, it may take a few seconds to update here.
         </div>
       ) : null}
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
-          gap: 16,
-        }}
-      >
+      {err ? <div style={styles.error}>{err}</div> : null}
+
+      <div style={styles.grid}>
         <Card title="Account">
           {loading ? (
             <Muted>Loading…</Muted>
@@ -223,25 +201,18 @@ export default function SettingsPage() {
             <>
               <Row label="Status" value={statusLabel()} />
               <Row label="Access" value={accessLabel()} strong />
-              <Row label="Renews / Ends" value={periodEndLabel()} />
-              <Row label="Plan" value={subscription?.price_id || "—"} mono />
+              <Row label="Plan" value={plan} />
+              <Row label="Renews / Ends" value={renews} />
 
-              <div
-                style={{
-                  marginTop: 12,
-                  padding: 12,
-                  borderRadius: 14,
-                  border: "1px solid #e5e7eb",
-                  background: "#fafafa",
-                  fontWeight: 850,
-                }}
-              >
+              <div style={styles.messageBox}>
                 {!status
                   ? "No subscription found yet. Start your trial to activate billing."
                   : status === "trialing"
                   ? "You’re in a trial right now. Cancel anytime before the trial ends to avoid charges."
                   : status === "active"
                   ? "Your subscription is active."
+                  : status === "past_due"
+                  ? "Your payment is past due. You may still have access temporarily—please update your payment method."
                   : "Your subscription is not active. Manage billing or resubscribe."}
               </div>
 
@@ -249,36 +220,18 @@ export default function SettingsPage() {
                 <button
                   onClick={handleManageBilling}
                   disabled={billingLoading}
-                  style={{
-                    padding: "11px 12px",
-                    borderRadius: 14,
-                    border: "1px solid #111",
-                    background: "#111",
-                    color: "white",
-                    fontWeight: 950,
-                    cursor: billingLoading ? "not-allowed" : "pointer",
-                  }}
+                  style={styles.btnPrimary}
                 >
                   {billingLoading ? "Opening…" : "Manage Billing"}
                 </button>
 
-                <Link
-                  href="/pricing"
-                  style={{
-                    padding: "11px 12px",
-                    borderRadius: 14,
-                    border: "1px solid #111",
-                    background: "white",
-                    textDecoration: "none",
-                    fontWeight: 950,
-                  }}
-                >
+                <Link href="/pricing" style={styles.btnGhost}>
                   View Pricing
                 </Link>
               </div>
 
-              <div style={{ marginTop: 10, fontSize: 12, opacity: 0.75 }}>
-                If you haven’t subscribed yet, “Manage Billing” will send you to pricing.
+              <div style={{ marginTop: 10, fontSize: 12, opacity: 0.7 }}>
+                Billing opens Stripe’s secure portal (update card, cancel, invoices).
               </div>
             </>
           )}
@@ -290,17 +243,8 @@ export default function SettingsPage() {
 
 function Card({ title, children }) {
   return (
-    <div
-      style={{
-        border: "1px solid #e5e7eb",
-        borderRadius: 18,
-        padding: 18,
-        background: "white",
-      }}
-    >
-      <div style={{ fontSize: 14, fontWeight: 950, marginBottom: 12 }}>
-        {title}
-      </div>
+    <div style={styles.card}>
+      <div style={styles.cardTitle}>{title}</div>
       {children}
     </div>
   );
@@ -308,24 +252,15 @@ function Card({ title, children }) {
 
 function Row({ label, value, mono, strong }) {
   return (
-    <div
-      style={{
-        display: "flex",
-        justifyContent: "space-between",
-        gap: 12,
-        padding: "8px 0",
-        borderBottom: "1px solid #f3f4f6",
-      }}
-    >
-      <div style={{ opacity: 0.7, fontWeight: 800 }}>{label}</div>
+    <div style={styles.row}>
+      <div style={styles.rowLabel}>{label}</div>
       <div
         style={{
+          ...styles.rowValue,
           fontWeight: strong ? 950 : 850,
           fontFamily: mono
             ? "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace"
             : "inherit",
-          wordBreak: "break-all",
-          textAlign: "right",
         }}
       >
         {value}
@@ -335,5 +270,106 @@ function Row({ label, value, mono, strong }) {
 }
 
 function Muted({ children }) {
-  return <div style={{ opacity: 0.75, fontWeight: 700 }}>{children}</div>;
+  return <div style={{ opacity: 0.75, fontWeight: 750 }}>{children}</div>;
 }
+
+const styles = {
+  header: {
+    display: "flex",
+    justifyContent: "space-between",
+    gap: 16,
+    alignItems: "flex-start",
+    flexWrap: "wrap",
+    marginBottom: 14,
+  },
+  h1: { fontSize: 28, fontWeight: 950, margin: 0 },
+  hint: { opacity: 0.7, marginTop: 8, marginBottom: 0, fontWeight: 750 },
+
+  grid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
+    gap: 14,
+    marginTop: 14,
+  },
+
+  card: {
+    border: "1px solid rgba(255,255,255,0.14)",
+    borderRadius: 18,
+    padding: 16,
+    background: "rgba(255,255,255,0.06)",
+    color: "white",
+  },
+  cardTitle: { fontSize: 14, fontWeight: 950, marginBottom: 12, opacity: 0.95 },
+
+  row: {
+    display: "flex",
+    justifyContent: "space-between",
+    gap: 12,
+    padding: "10px 0",
+    borderBottom: "1px solid rgba(255,255,255,0.10)",
+  },
+  rowLabel: { opacity: 0.7, fontWeight: 800 },
+  rowValue: { fontWeight: 850, wordBreak: "break-all", textAlign: "right" },
+
+  btnPrimary: {
+    padding: "11px 12px",
+    borderRadius: 14,
+    border: "1px solid rgba(255,255,255,0.18)",
+    background: "rgba(255,255,255,0.10)",
+    color: "white",
+    fontWeight: 950,
+    cursor: "pointer",
+  },
+  btn: {
+    padding: "9px 12px",
+    borderRadius: 12,
+    border: "1px solid rgba(255,255,255,0.16)",
+    background: "rgba(255,255,255,0.06)",
+    color: "white",
+    fontWeight: 900,
+    cursor: "pointer",
+  },
+  btnGhost: {
+    padding: "9px 12px",
+    borderRadius: 12,
+    border: "1px solid rgba(255,255,255,0.16)",
+    background: "transparent",
+    color: "white",
+    fontWeight: 900,
+    textDecoration: "none",
+  },
+  btnDanger: {
+    border: "1px solid rgba(239,68,68,0.35)",
+    background: "rgba(239,68,68,0.10)",
+    color: "#fecaca",
+  },
+
+  messageBox: {
+    marginTop: 12,
+    padding: 12,
+    borderRadius: 14,
+    border: "1px solid rgba(255,255,255,0.14)",
+    background: "rgba(0,0,0,0.25)",
+    fontWeight: 850,
+    lineHeight: 1.45,
+  },
+
+  notice: {
+    border: "1px solid rgba(34,197,94,0.35)",
+    background: "rgba(34,197,94,0.10)",
+    color: "#bbf7d0",
+    padding: 12,
+    borderRadius: 14,
+    fontWeight: 850,
+    marginTop: 10,
+  },
+  error: {
+    border: "1px solid rgba(239,68,68,0.35)",
+    background: "rgba(239,68,68,0.10)",
+    color: "#fecaca",
+    padding: 12,
+    borderRadius: 14,
+    fontWeight: 850,
+    marginTop: 10,
+  },
+};
