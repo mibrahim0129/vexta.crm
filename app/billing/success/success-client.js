@@ -23,12 +23,32 @@ export default function SuccessClient() {
       try {
         const { data } = await sb.auth.getSession();
         const userId = data?.session?.user?.id;
+        const token = data?.session?.access_token;
 
-        if (!userId) {
+        if (!userId || !token) {
           router.replace(`/login?next=${encodeURIComponent("/billing/success")}`);
           return;
         }
 
+        // 1) Force a server-side sync from Stripe using session_id
+        if (sessionId) {
+          try {
+            setMsg("Syncing payment with Stripe…");
+            await fetch("/api/stripe/sync", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${token}`,
+              },
+              body: JSON.stringify({ session_id: sessionId }),
+            });
+          } catch {
+            // ignore and fall back to polling
+          }
+        }
+
+        // 2) Poll DB for up to ~10 seconds
+        setMsg("Finalizing your subscription…");
         const okStatuses = new Set(["active", "trialing", "past_due"]);
         const started = Date.now();
 
@@ -67,7 +87,7 @@ export default function SuccessClient() {
       alive = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [sessionId]);
 
   return (
     <div
@@ -92,12 +112,6 @@ export default function SuccessClient() {
       >
         <div style={{ fontWeight: 950, fontSize: 20 }}>Payment successful 🎉</div>
         <div style={{ marginTop: 8, opacity: 0.85, fontWeight: 750 }}>{msg}</div>
-
-        {sessionId ? (
-          <div style={{ marginTop: 10, opacity: 0.7, fontSize: 12 }}>
-            Session: <span style={{ fontFamily: "monospace" }}>{sessionId}</span>
-          </div>
-        ) : null}
 
         {err ? (
           <div

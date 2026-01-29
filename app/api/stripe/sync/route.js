@@ -3,6 +3,8 @@ import { NextResponse } from "next/server";
 import Stripe from "stripe";
 import { createClient } from "@supabase/supabase-js";
 
+export const runtime = "nodejs";
+
 function getStripe() {
   const key = process.env.STRIPE_SECRET_KEY;
   if (!key) throw new Error("Missing STRIPE_SECRET_KEY");
@@ -24,6 +26,10 @@ function getBearerToken(req) {
   return null;
 }
 
+function toIsoFromUnix(unixSeconds) {
+  return unixSeconds ? new Date(unixSeconds * 1000).toISOString() : null;
+}
+
 export async function POST(req) {
   try {
     const token = getBearerToken(req);
@@ -31,8 +37,9 @@ export async function POST(req) {
       return NextResponse.json({ error: "Missing Authorization token" }, { status: 401 });
     }
 
-    const { session_id } = await req.json().catch(() => ({}));
-    if (!session_id) {
+    const body = await req.json().catch(() => ({}));
+    const sessionId = body?.session_id;
+    if (!sessionId) {
       return NextResponse.json({ error: "Missing session_id" }, { status: 400 });
     }
 
@@ -46,42 +53,39 @@ export async function POST(req) {
     }
 
     const stripe = getStripe();
-    const checkout = await stripe.checkout.sessions.retrieve(session_id);
 
-    const stripeCustomerId = checkout.customer ? String(checkout.customer) : null;
-    const stripeSubscriptionId = checkout.subscription ? String(checkout.subscription) : null;
+    // Pull session directly from Stripe
+    const session = await stripe.checkout.sessions.retrieve(sessionId);
 
-    if (!stripeCustomerId) {
+    const stripeCustomerId = String(session.customer || "");
+    const stripeSubscriptionId = String(session.subscription || "");
+
+    if (!stripeSubscriptionId) {
       return NextResponse.json(
-        { error: "No Stripe customer found on checkout session." },
-        { status: 400 }
+        { error: "No subscription on this checkout session yet" },
+        { status: 409 }
       );
     }
 
-    let status = "incomplete";
-    let price_id = null;
-    let current_period_end = null;
+    const sub = await stripe.subscriptions.retrieve(stripeSubscriptionId);
 
-    if (stripeSubscriptionId) {
-      const sub = await stripe.subscriptions.retrieve(stripeSubscriptionId);
-      status = sub.status || "incomplete";
-      price_id = sub.items?.data?.[0]?.price?.id || null;
-      current_period_end = sub.current_period_end
-        ? new Date(sub.current_period_end * 1000).toISOString()
-        : null;
-    }
+    const status = sub.status || "incomplete";
+    const priceId = sub.items?.data?.[0]?.price?.id ?? null;
+    const currentPeriodEnd = toIsoFromUnix(sub.current_period_end);
 
-    await admin.from("subscriptions").upsert(
-      {
-        user_id: user.id,
-        stripe_customer_id: stripeCustomerId,
-        stripe_subscription_id: stripeSubscriptionId,
-        status,
-        price_id,
-        current_period_end,
-      },
-      { onConflict: "user_id" }
-    );
+    await admin
+      .from("subscriptions")
+      .upsert(
+        {
+          user_id: user.id,
+          stripe_customer_id: stripeCustomerId,
+          stripe_subscription_id: stripeSubscriptionId,
+          status,
+          price_id: priceId,
+          current_period_end: currentPeriodEnd,
+        },
+        { onConflict: "user_id" }
+      );
 
     return NextResponse.json({ ok: true, status });
   } catch (e) {
