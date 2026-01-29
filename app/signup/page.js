@@ -4,7 +4,8 @@
 import Link from "next/link";
 import { Suspense, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
+import { supabaseBrowser } from "@/lib/supabase/browser";
+import Footer from "@/app/components/Footer";
 
 function GoogleIcon() {
   return (
@@ -32,7 +33,7 @@ function GoogleIcon() {
 function SignupInner() {
   const router = useRouter();
   const sp = useSearchParams();
-  const sb = useMemo(() => createSupabaseBrowserClient(), []);
+  const sb = useMemo(() => supabaseBrowser(), []);
 
   const redirectTo = useMemo(() => {
     const r = sp.get("redirectTo") || sp.get("next");
@@ -95,8 +96,11 @@ function SignupInner() {
     setOauthLoading(true);
 
     try {
+      // Store where to go AFTER signup/login
+      localStorage.setItem("vexta_next", redirectTo);
+
       const origin = window.location.origin;
-      const cb = `${origin}/auth/callback?next=${encodeURIComponent(redirectTo)}`;
+      const cb = `${origin}/auth/callback`; // ✅ NO query params
 
       const { error } = await sb.auth.signInWithOAuth({
         provider: "google",
@@ -187,6 +191,18 @@ function SignupInner() {
             <Link href="/login">Already have an account?</Link>
             <Link href="/">Back to home</Link>
           </div>
+
+          <div className="legalLinks">
+            <Link href="/terms">Terms</Link>
+            <span className="dot">•</span>
+            <Link href="/privacy">Privacy</Link>
+            <span className="dot">•</span>
+            <Link href="/refunds">Refunds</Link>
+          </div>
+        </div>
+
+        <div className="footerWrap">
+          <Footer variant="dark" />
         </div>
       </div>
 
@@ -210,6 +226,8 @@ function SignupInner() {
         .wrap {
           width: 100%;
           max-width: 560px;
+          display: grid;
+          gap: 14px;
         }
         .card {
           border-radius: 18px;
@@ -351,6 +369,27 @@ function SignupInner() {
           color: rgba(255, 255, 255, 0.7);
           text-decoration: none;
           font-weight: 850;
+        }
+        .legalLinks {
+          margin-top: 12px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+          font-size: 12px;
+          opacity: 0.9;
+        }
+        .legalLinks :global(a) {
+          color: rgba(255, 255, 255, 0.65);
+          text-decoration: none;
+          font-weight: 850;
+        }
+        .dot {
+          opacity: 0.35;
+          font-weight: 900;
+        }
+        .footerWrap {
+          padding: 0 2px 8px;
         }
       `}</style>
     </main>
