@@ -4,6 +4,10 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { supabaseBrowser } from "@/lib/supabase/browser";
 
+// ✅ Soft gating
+import { useSubscription } from "@/lib/subscription/useSubscription";
+import UpgradeBanner from "@/components/UpgradeBanner";
+
 const STATUSES = [
   { value: "lead", label: "Lead" },
   { value: "active", label: "Active" },
@@ -14,6 +18,10 @@ const STATUSES = [
 export default function DealsPage() {
   const sb = useMemo(() => supabaseBrowser(), []);
   const mountedRef = useRef(false);
+
+  // ✅ Subscription (soft gating)
+  const { loading: subLoading, access, plan } = useSubscription();
+  const canWrite = !subLoading && access; // gate create + updates
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -125,6 +133,12 @@ export default function DealsPage() {
     e.preventDefault();
     setErr("");
 
+    // ✅ Soft gating
+    if (!canWrite) {
+      setErr("Upgrade required to add new deals.");
+      return;
+    }
+
     const title = form.title.trim();
     if (!title) {
       setErr("Deal title is required.");
@@ -171,7 +185,10 @@ export default function DealsPage() {
       if (error) throw error;
 
       setDeals((prev) => [data, ...prev]);
-      setEditMap((p) => ({ ...p, [data.id]: { title: data.title || "", value: String(data.value ?? 0) } }));
+      setEditMap((p) => ({
+        ...p,
+        [data.id]: { title: data.title || "", value: String(data.value ?? 0) },
+      }));
       setForm((p) => ({ ...p, title: "", status: "lead", value: "" }));
     } catch (e) {
       console.error(e);
@@ -183,6 +200,13 @@ export default function DealsPage() {
 
   async function updateDealStatus(dealId, newStatus) {
     setErr("");
+
+    // ✅ Soft gating
+    if (!canWrite) {
+      setErr("Upgrade required to update deals.");
+      return;
+    }
+
     try {
       const session = await requireSession();
       if (!session) return;
@@ -199,6 +223,13 @@ export default function DealsPage() {
 
   async function saveDealDetails(dealId) {
     setErr("");
+
+    // ✅ Soft gating
+    if (!canWrite) {
+      setErr("Upgrade required to edit deals.");
+      return;
+    }
+
     setSavingId(dealId);
 
     try {
@@ -218,9 +249,7 @@ export default function DealsPage() {
       const { error } = await sb.from("deals").update({ title, value: safeValue }).eq("id", dealId);
       if (error) throw error;
 
-      setDeals((prev) =>
-        prev.map((d) => (d.id === dealId ? { ...d, title, value: safeValue } : d))
-      );
+      setDeals((prev) => prev.map((d) => (d.id === dealId ? { ...d, title, value: safeValue } : d)));
     } catch (e) {
       console.error(e);
       setErr(e?.message || "Failed to save deal");
@@ -278,8 +307,7 @@ export default function DealsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const filteredDeals =
-    filterStatus === "all" ? deals : deals.filter((d) => d.status === filterStatus);
+  const filteredDeals = filterStatus === "all" ? deals : deals.filter((d) => d.status === filterStatus);
 
   return (
     <div>
@@ -288,15 +316,15 @@ export default function DealsPage() {
           <h1 style={styles.h1}>Deals</h1>
           <p style={styles.sub}>
             Realtime: <span style={styles.badge}>{rtStatus}</span>
+            {" "}
+            <span style={{ opacity: 0.85 }}>
+              {subLoading ? " • Checking plan…" : ` • Plan: ${plan || "Free"}`}
+            </span>
           </p>
         </div>
 
         <div style={styles.headerRight}>
-          <select
-            value={filterStatus}
-            onChange={(e) => setFilterStatus(e.target.value)}
-            style={styles.selectSmall}
-          >
+          <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} style={styles.selectSmall}>
             <option value="all">All statuses</option>
             {STATUSES.map((s) => (
               <option key={s.value} value={s.value}>
@@ -311,6 +339,16 @@ export default function DealsPage() {
         </div>
       </div>
 
+      {/* ✅ Upgrade banner */}
+      {!subLoading && !access ? (
+        <div style={{ marginTop: 14 }}>
+          <UpgradeBanner
+            title="Upgrade to create & edit deals"
+            body="You can view your deals, but creating or editing deals requires an active plan."
+          />
+        </div>
+      ) : null}
+
       {err ? <div style={styles.alert}>{err}</div> : null}
 
       <div style={styles.card}>
@@ -322,6 +360,7 @@ export default function DealsPage() {
               value={form.contact_id}
               onChange={(e) => setForm((p) => ({ ...p, contact_id: e.target.value }))}
               style={styles.select}
+              disabled={!canWrite || saving}
             >
               {contacts.length === 0 ? (
                 <option value="">No contacts found</option>
@@ -341,6 +380,7 @@ export default function DealsPage() {
               value={form.status}
               onChange={(e) => setForm((p) => ({ ...p, status: e.target.value }))}
               style={styles.select}
+              disabled={!canWrite || saving}
             >
               {STATUSES.map((s) => (
                 <option key={s.value} value={s.value}>
@@ -355,6 +395,7 @@ export default function DealsPage() {
             onChange={(e) => setForm((p) => ({ ...p, title: e.target.value }))}
             placeholder="Deal title"
             style={styles.input}
+            disabled={!canWrite || saving}
           />
 
           <div style={styles.grid2}>
@@ -363,11 +404,34 @@ export default function DealsPage() {
               onChange={(e) => setForm((p) => ({ ...p, value: e.target.value }))}
               placeholder="Value ($)"
               style={styles.input}
+              disabled={!canWrite || saving}
             />
-            <button type="submit" disabled={saving || contacts.length === 0} style={styles.btnPrimary}>
-              {saving ? "Saving..." : "Add Deal"}
+
+            <button
+              type="submit"
+              disabled={!canWrite || saving || contacts.length === 0}
+              style={{
+                ...styles.btnPrimary,
+                ...( !canWrite
+                  ? {
+                      opacity: 0.55,
+                      cursor: "not-allowed",
+                      border: "1px solid #2a2a2a",
+                      background: "#141414",
+                      color: "#bdbdbd",
+                    }
+                  : {}),
+              }}
+            >
+              {subLoading ? "Checking plan…" : saving ? "Saving..." : "Add Deal"}
             </button>
           </div>
+
+          {!subLoading && !access ? (
+            <div style={{ marginTop: 6, opacity: 0.75, fontSize: 12 }}>
+              Creating & editing deals is disabled until you upgrade.
+            </div>
+          ) : null}
 
           {contacts.length === 0 ? (
             <div style={{ marginTop: 6, opacity: 0.75, fontSize: 12 }}>
@@ -429,6 +493,7 @@ export default function DealsPage() {
                           }
                           style={styles.input}
                           placeholder="Deal title"
+                          disabled={!canWrite}
                         />
                         <input
                           value={edit.value}
@@ -437,6 +502,7 @@ export default function DealsPage() {
                           }
                           style={styles.input}
                           placeholder="Value ($)"
+                          disabled={!canWrite}
                         />
                       </div>
 
@@ -446,7 +512,11 @@ export default function DealsPage() {
                           <select
                             value={d.status}
                             onChange={(e) => updateDealStatus(d.id, e.target.value)}
-                            style={styles.selectInline}
+                            style={{
+                              ...styles.selectInline,
+                              ...( !canWrite ? { opacity: 0.6, cursor: "not-allowed" } : {}),
+                            }}
+                            disabled={!canWrite}
                           >
                             {STATUSES.map((s) => (
                               <option key={s.value} value={s.value}>
@@ -458,10 +528,21 @@ export default function DealsPage() {
 
                         <button
                           onClick={() => saveDealDetails(d.id)}
-                          disabled={savingId === d.id}
-                          style={styles.btnPrimarySmall}
+                          disabled={!canWrite || savingId === d.id}
+                          style={{
+                            ...styles.btnPrimarySmall,
+                            ...( !canWrite
+                              ? {
+                                  opacity: 0.55,
+                                  cursor: "not-allowed",
+                                  border: "1px solid #2a2a2a",
+                                  background: "#141414",
+                                  color: "#bdbdbd",
+                                }
+                              : {}),
+                          }}
                         >
-                          {savingId === d.id ? "Saving..." : "Save"}
+                          {!canWrite ? "Upgrade" : savingId === d.id ? "Saving..." : "Save"}
                         </button>
                       </div>
                     </div>
