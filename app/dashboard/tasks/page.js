@@ -4,9 +4,17 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { supabaseBrowser } from "@/lib/supabase/browser";
 
+// ✅ Soft gating
+import { useSubscription } from "@/lib/subscription/useSubscription";
+import UpgradeBanner from "@/components/UpgradeBanner";
+
 export default function TasksPage() {
   const sb = useMemo(() => supabaseBrowser(), []);
   const mountedRef = useRef(false);
+
+  // ✅ Subscription (soft gating)
+  const { loading: subLoading, access, plan } = useSubscription();
+  const canWrite = !subLoading && access;
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -177,6 +185,12 @@ export default function TasksPage() {
     e.preventDefault();
     setErr("");
 
+    // ✅ Soft gating
+    if (!canWrite) {
+      setErr("Upgrade required to add tasks.");
+      return;
+    }
+
     const title = (form.title || "").trim();
     if (!title) return setErr("Task title can’t be empty.");
     if (!form.contact_id) return setErr("Please select a contact.");
@@ -213,6 +227,13 @@ export default function TasksPage() {
 
   async function toggleTask(t) {
     setErr("");
+
+    // ✅ Soft gating
+    if (!canWrite) {
+      setErr("Upgrade required to update tasks.");
+      return;
+    }
+
     try {
       const session = await requireSession();
       if (!session) return;
@@ -325,7 +346,7 @@ export default function TasksPage() {
       return String(b.created_at || "").localeCompare(String(a.created_at || ""));
     });
 
-  // Buckets (feel like a real CRM)
+  // Buckets
   const overdue = sortByDueThenCreated(filteredTasks.filter((t) => isOverdue(t.due_at, t.completed)));
   const dueToday = sortByDueThenCreated(filteredTasks.filter((t) => !t.completed && isToday(t.due_at)));
   const next7 = sortByDueThenCreated(
@@ -334,7 +355,8 @@ export default function TasksPage() {
   const noDue = sortByDueThenCreated(filteredTasks.filter((t) => !t.completed && !t.due_at));
   const completed = sortByDueThenCreated(filteredTasks.filter((t) => t.completed));
 
-  const canCreate = contacts.length > 0;
+  const hasContacts = contacts.length > 0;
+  const canCreate = hasContacts && canWrite;
 
   function TaskRow({ t }) {
     const overdueFlag = isOverdue(t.due_at, t.completed);
@@ -347,8 +369,9 @@ export default function TasksPage() {
             <button
               onClick={() => toggleTask(t)}
               style={t.completed ? styles.chkOn : styles.chkOff}
-              title={t.completed ? "Mark as open" : "Mark as done"}
+              title={!canWrite ? "Upgrade required" : t.completed ? "Mark as open" : "Mark as done"}
               type="button"
+              disabled={!canWrite}
             />
             <div style={{ display: "grid", gap: 6, minWidth: 0 }}>
               <div
@@ -419,6 +442,10 @@ export default function TasksPage() {
           <h1 style={styles.h1}>Tasks</h1>
           <p style={styles.sub}>
             Daily to-dos • Realtime: <span style={styles.badge}>{rtStatus}</span>
+            {" "}
+            <span style={{ opacity: 0.85 }}>
+              {subLoading ? " • Checking plan…" : ` • Plan: ${plan || "Free"}`}
+            </span>
           </p>
         </div>
 
@@ -428,6 +455,16 @@ export default function TasksPage() {
           </button>
         </div>
       </div>
+
+      {/* ✅ Upgrade banner */}
+      {!subLoading && !access ? (
+        <div style={{ marginTop: 14 }}>
+          <UpgradeBanner
+            title="Upgrade to use tasks"
+            body="You can view tasks, but creating or completing tasks requires an active plan."
+          />
+        </div>
+      ) : null}
 
       {err ? <div style={styles.alert}>{err}</div> : null}
 
@@ -441,7 +478,7 @@ export default function TasksPage() {
               value={form.contact_id}
               onChange={(e) => setForm((p) => ({ ...p, contact_id: e.target.value }))}
               style={styles.select}
-              disabled={!canCreate}
+              disabled={!canCreate || saving}
             >
               {contacts.length === 0 ? (
                 <option value="">No contacts found</option>
@@ -458,7 +495,7 @@ export default function TasksPage() {
               value={form.deal_id}
               onChange={(e) => setForm((p) => ({ ...p, deal_id: e.target.value }))}
               style={styles.select}
-              disabled={!canCreate}
+              disabled={!canCreate || saving}
             >
               <option value="">No deal (optional)</option>
               {deals
@@ -476,7 +513,7 @@ export default function TasksPage() {
             onChange={(e) => setForm((p) => ({ ...p, title: e.target.value }))}
             placeholder="Task title..."
             style={styles.input}
-            disabled={!canCreate}
+            disabled={!canCreate || saving}
           />
 
           <textarea
@@ -485,7 +522,7 @@ export default function TasksPage() {
             placeholder="Description (optional)..."
             style={styles.textarea}
             rows={2}
-            disabled={!canCreate}
+            disabled={!canCreate || saving}
           />
 
           <input
@@ -493,20 +530,41 @@ export default function TasksPage() {
             value={form.due_at}
             onChange={(e) => setForm((p) => ({ ...p, due_at: e.target.value }))}
             style={{ ...styles.input, colorScheme: "dark" }}
-            disabled={!canCreate}
+            disabled={!canCreate || saving}
           />
 
-          <button type="submit" disabled={saving || !canCreate} style={styles.btnPrimary}>
-            {saving ? "Saving..." : "Add Task"}
+          <button
+            type="submit"
+            disabled={!canCreate || saving}
+            style={{
+              ...styles.btnPrimary,
+              ...( !canWrite
+                ? {
+                    opacity: 0.55,
+                    cursor: "not-allowed",
+                    border: "1px solid #2a2a2a",
+                    background: "#141414",
+                    color: "#bdbdbd",
+                  }
+                : {}),
+            }}
+          >
+            {subLoading ? "Checking plan…" : saving ? "Saving..." : "Add Task"}
           </button>
 
-          {!canCreate ? (
+          {!hasContacts ? (
             <div style={{ marginTop: 6, opacity: 0.75, fontSize: 12 }}>
               Add a contact first in{" "}
               <Link href="/dashboard/contacts" style={{ color: "white", fontWeight: 900 }}>
                 Contacts
               </Link>
               .
+            </div>
+          ) : null}
+
+          {hasContacts && !subLoading && !access ? (
+            <div style={{ marginTop: 6, opacity: 0.75, fontSize: 12 }}>
+              Creating/completing tasks is disabled until you upgrade.
             </div>
           ) : null}
         </form>
