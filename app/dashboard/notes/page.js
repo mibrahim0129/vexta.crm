@@ -4,9 +4,17 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { supabaseBrowser } from "@/lib/supabase/browser";
 
+// ✅ Soft gating
+import { useSubscription } from "@/lib/subscription/useSubscription";
+import UpgradeBanner from "@/components/UpgradeBanner";
+
 export default function NotesPage() {
   const sb = useMemo(() => supabaseBrowser(), []);
   const mountedRef = useRef(false);
+
+  // ✅ Subscription (soft gating)
+  const { loading: subLoading, access, plan } = useSubscription();
+  const canWrite = !subLoading && access;
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -133,6 +141,12 @@ export default function NotesPage() {
     e.preventDefault();
     setErr("");
 
+    // ✅ Soft gating: block create, but still allow viewing
+    if (!canWrite) {
+      setErr("Upgrade required to add new notes.");
+      return;
+    }
+
     const body = form.body.trim();
     if (!body) {
       setErr("Note can’t be empty.");
@@ -251,7 +265,10 @@ export default function NotesPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const canCreate = contacts.length > 0;
+  const hasContacts = contacts.length > 0;
+
+  // ✅ For notes: you must have contacts AND have write access to create
+  const canCreate = hasContacts && canWrite;
 
   return (
     <div>
@@ -260,6 +277,10 @@ export default function NotesPage() {
           <h1 style={styles.h1}>Notes</h1>
           <p style={styles.sub}>
             Activity log • Realtime: <span style={styles.badge}>{rtStatus}</span>
+            {" "}
+            <span style={{ opacity: 0.85 }}>
+              {subLoading ? " • Checking plan…" : ` • Plan: ${plan || "Free"}`}
+            </span>
           </p>
         </div>
 
@@ -286,6 +307,16 @@ export default function NotesPage() {
         </div>
       </div>
 
+      {/* ✅ Upgrade banner */}
+      {!subLoading && !access ? (
+        <div style={{ marginTop: 14 }}>
+          <UpgradeBanner
+            title="Upgrade to add notes"
+            body="You can view your existing notes, but adding new notes requires an active plan."
+          />
+        </div>
+      ) : null}
+
       {err ? <div style={styles.alert}>{err}</div> : null}
 
       <div style={styles.card}>
@@ -297,7 +328,7 @@ export default function NotesPage() {
               value={form.contact_id}
               onChange={(e) => setForm((p) => ({ ...p, contact_id: e.target.value }))}
               style={styles.select}
-              disabled={!canCreate}
+              disabled={!canCreate || saving}
             >
               {contacts.length === 0 ? (
                 <option value="">No contacts found</option>
@@ -317,7 +348,7 @@ export default function NotesPage() {
               value={form.deal_id}
               onChange={(e) => setForm((p) => ({ ...p, deal_id: e.target.value }))}
               style={styles.select}
-              disabled={!canCreate}
+              disabled={!canCreate || saving}
             >
               <option value="">No deal (optional)</option>
               {deals.map((d) => (
@@ -334,20 +365,41 @@ export default function NotesPage() {
             placeholder="Write your note..."
             style={styles.textarea}
             rows={4}
-            disabled={!canCreate}
+            disabled={!canCreate || saving}
           />
 
-          <button type="submit" disabled={saving || !canCreate} style={styles.btnPrimary}>
-            {saving ? "Saving..." : "Add Note"}
+          <button
+            type="submit"
+            disabled={!canCreate || saving}
+            style={{
+              ...styles.btnPrimary,
+              ...( !canWrite
+                ? {
+                    opacity: 0.55,
+                    cursor: "not-allowed",
+                    border: "1px solid #2a2a2a",
+                    background: "#141414",
+                    color: "#bdbdbd",
+                  }
+                : {}),
+            }}
+          >
+            {subLoading ? "Checking plan…" : saving ? "Saving..." : "Add Note"}
           </button>
 
-          {!canCreate ? (
+          {!hasContacts ? (
             <div style={{ marginTop: 6, opacity: 0.75, fontSize: 12 }}>
               Add a contact first in{" "}
               <Link href="/dashboard/contacts" style={{ color: "white", fontWeight: 900 }}>
                 Contacts
               </Link>
               .
+            </div>
+          ) : null}
+
+          {hasContacts && !subLoading && !access ? (
+            <div style={{ marginTop: 6, opacity: 0.75, fontSize: 12 }}>
+              Adding notes is disabled until you upgrade.
             </div>
           ) : null}
         </form>
