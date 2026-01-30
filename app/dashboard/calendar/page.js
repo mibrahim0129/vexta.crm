@@ -4,9 +4,17 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { supabaseBrowser } from "@/lib/supabase/browser";
 
+// ✅ Soft gating
+import { useSubscription } from "@/lib/subscription/useSubscription";
+import UpgradeBanner from "@/components/UpgradeBanner";
+
 export default function CalendarPage() {
   const sb = useMemo(() => supabaseBrowser(), []);
   const mountedRef = useRef(false);
+
+  // ✅ Subscription (soft gating)
+  const { loading: subLoading, access, plan } = useSubscription();
+  const canWrite = !subLoading && access;
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -97,6 +105,22 @@ export default function CalendarPage() {
     });
   }
 
+  function formatTimeRange(startIso, endIso) {
+    const s = startIso ? new Date(startIso) : null;
+    const e = endIso ? new Date(endIso) : null;
+    if (!s || Number.isNaN(s.getTime())) return "—";
+    if (!e || Number.isNaN(e.getTime())) return s.toLocaleString();
+
+    const sameDay =
+      s.getFullYear() === e.getFullYear() && s.getMonth() === e.getMonth() && s.getDate() === e.getDate();
+
+    const sTime = s.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+    const eTime = e.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+
+    if (sameDay) return `${sTime} → ${eTime}`;
+    return `${s.toLocaleString()} → ${e.toLocaleString()}`;
+  }
+
   async function loadContacts() {
     const { data, error } = await sb
       .from("contacts")
@@ -114,10 +138,7 @@ export default function CalendarPage() {
   }
 
   async function loadDeals(contactIdForDeals) {
-    let q = sb
-      .from("deals")
-      .select("id, title, contact_id")
-      .order("created_at", { ascending: false });
+    let q = sb.from("deals").select("id, title, contact_id").order("created_at", { ascending: false });
 
     if (contactIdForDeals && contactIdForDeals !== "all") {
       q = q.eq("contact_id", contactIdForDeals);
@@ -137,7 +158,6 @@ export default function CalendarPage() {
     setLoading(true);
 
     try {
-      // Pull all events; filtering is done client-side to keep it simple & fast for MVP
       const { data, error } = await sb
         .from("calendar_events")
         .select(
@@ -191,6 +211,12 @@ export default function CalendarPage() {
   async function addEvent(e) {
     e.preventDefault();
     setErr("");
+
+    // ✅ Soft gating
+    if (!canWrite) {
+      setErr("Upgrade required to add calendar events.");
+      return;
+    }
 
     const title = (form.title || "").trim();
     if (!title) return setErr("Event title can’t be empty.");
@@ -345,16 +371,27 @@ export default function CalendarPage() {
     .sort((a, b) => String(a.start_at || "").localeCompare(String(b.start_at || "")));
 
   const groups = groupByDay(filteredEvents);
-  const canCreate = contacts.length > 0;
+
+  const hasContacts = contacts.length > 0;
+  const canCreate = hasContacts && canWrite;
 
   return (
     <div>
       <div style={styles.header}>
-        <div>
-          <h1 style={styles.h1}>Calendar</h1>
-          <p style={styles.sub}>
-            List view • Realtime: <span style={styles.badge}>{rtStatus}</span>
-          </p>
+        <div style={{ minWidth: 0 }}>
+          <div style={styles.titleRow}>
+            <h1 style={styles.h1}>Calendar</h1>
+
+            <span style={styles.pill}>
+              {subLoading ? "Checking plan…" : `Plan: ${plan || "Free"}`}
+            </span>
+
+            <span style={styles.pill}>
+              Realtime: <span style={{ fontWeight: 950 }}>{rtStatus}</span>
+            </span>
+          </div>
+
+          <p style={styles.sub}>List view for appointments, showings, calls, and deadlines.</p>
         </div>
 
         <div style={styles.headerRight}>
@@ -364,11 +401,28 @@ export default function CalendarPage() {
         </div>
       </div>
 
+      {/* ✅ Upgrade banner */}
+      {!subLoading && !access ? (
+        <div style={{ marginTop: 14 }}>
+          <UpgradeBanner
+            title="Upgrade to use calendar"
+            body="You can view events, but creating new events requires an active plan."
+          />
+        </div>
+      ) : null}
+
       {err ? <div style={styles.alert}>{err}</div> : null}
 
       {/* Add Event */}
       <div style={styles.card}>
-        <h2 style={styles.h2}>Add Event</h2>
+        <div style={styles.cardTop}>
+          <h2 style={styles.h2}>Add Event</h2>
+          {!subLoading && !access ? (
+            <div style={{ fontSize: 12, opacity: 0.8 }}>
+              Creating events is disabled until you upgrade.
+            </div>
+          ) : null}
+        </div>
 
         <form onSubmit={addEvent} style={styles.form}>
           <div style={styles.grid2}>
@@ -376,7 +430,7 @@ export default function CalendarPage() {
               value={form.contact_id}
               onChange={(e) => setForm((p) => ({ ...p, contact_id: e.target.value }))}
               style={styles.select}
-              disabled={!canCreate}
+              disabled={!canCreate || saving}
             >
               {contacts.length === 0 ? (
                 <option value="">No contacts found</option>
@@ -396,7 +450,7 @@ export default function CalendarPage() {
               value={form.deal_id}
               onChange={(e) => setForm((p) => ({ ...p, deal_id: e.target.value }))}
               style={styles.select}
-              disabled={!canCreate}
+              disabled={!canCreate || saving}
             >
               <option value="">No deal (optional)</option>
               {deals
@@ -414,7 +468,7 @@ export default function CalendarPage() {
             onChange={(e) => setForm((p) => ({ ...p, title: e.target.value }))}
             placeholder="Event title..."
             style={styles.input}
-            disabled={!canCreate}
+            disabled={!canCreate || saving}
           />
 
           <input
@@ -422,7 +476,7 @@ export default function CalendarPage() {
             onChange={(e) => setForm((p) => ({ ...p, location: e.target.value }))}
             placeholder="Location (optional)..."
             style={styles.input}
-            disabled={!canCreate}
+            disabled={!canCreate || saving}
           />
 
           <div style={styles.grid2}>
@@ -431,7 +485,7 @@ export default function CalendarPage() {
               value={form.start_at}
               onChange={(e) => setForm((p) => ({ ...p, start_at: e.target.value }))}
               style={{ ...styles.input, colorScheme: "dark" }}
-              disabled={!canCreate}
+              disabled={!canCreate || saving}
             />
 
             <input
@@ -439,7 +493,7 @@ export default function CalendarPage() {
               value={form.end_at}
               onChange={(e) => setForm((p) => ({ ...p, end_at: e.target.value }))}
               style={{ ...styles.input, colorScheme: "dark" }}
-              disabled={!canCreate}
+              disabled={!canCreate || saving}
             />
           </div>
 
@@ -449,14 +503,29 @@ export default function CalendarPage() {
             placeholder="Notes (optional)..."
             style={styles.textarea}
             rows={3}
-            disabled={!canCreate}
+            disabled={!canCreate || saving}
           />
 
-          <button type="submit" disabled={saving || !canCreate} style={styles.btnPrimary}>
-            {saving ? "Saving..." : "Add Event"}
+          <button
+            type="submit"
+            disabled={!canCreate || saving}
+            style={{
+              ...styles.btnPrimary,
+              ...(!canWrite
+                ? {
+                    opacity: 0.55,
+                    cursor: "not-allowed",
+                    border: "1px solid #2a2a2a",
+                    background: "#141414",
+                    color: "#bdbdbd",
+                  }
+                : {}),
+            }}
+          >
+            {subLoading ? "Checking plan…" : saving ? "Saving..." : "Add Event"}
           </button>
 
-          {!canCreate ? (
+          {!hasContacts ? (
             <div style={{ marginTop: 6, opacity: 0.75, fontSize: 12 }}>
               Add a contact first in{" "}
               <Link href="/dashboard/contacts" style={{ color: "white", fontWeight: 900 }}>
@@ -522,10 +591,10 @@ export default function CalendarPage() {
                 <div key={g.key} style={styles.dayGroup}>
                   <div style={styles.dayHeader}>
                     <div style={{ fontWeight: 950 }}>{label}</div>
-                    <div style={{ opacity: 0.75, fontSize: 13 }}>{g.items.length}</div>
+                    <div style={styles.countPill}>{g.items.length}</div>
                   </div>
 
-                  <div style={{ display: "grid", gap: 10, marginTop: 10 }}>
+                  <div style={{ display: "grid", gap: 10, marginTop: 12 }}>
                     {g.items.map((ev) => {
                       const c = ev.contacts;
                       const d = ev.deals;
@@ -534,23 +603,31 @@ export default function CalendarPage() {
                         ? `${c.first_name || ""} ${c.last_name || ""}`.trim() || "Unnamed"
                         : "Unknown";
 
-                      return (
-                        <div key={ev.id} style={styles.item}>
-                          <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
-                            <div style={{ display: "grid", gap: 6 }}>
-                              <div style={{ fontWeight: 950 }}>{ev.title}</div>
+                      const timeRange = formatTimeRange(ev.start_at, ev.end_at);
 
-                              <div style={{ opacity: 0.85 }}>
-                                {ev.start_at ? new Date(ev.start_at).toLocaleString() : "—"} →{" "}
-                                {ev.end_at ? new Date(ev.end_at).toLocaleString() : "—"}
+                      return (
+                        <div key={ev.id} style={styles.eventCard}>
+                          <div style={styles.eventTop}>
+                            <div style={{ minWidth: 0 }}>
+                              <div style={styles.eventTitleRow}>
+                                <div style={styles.eventTitle}>{ev.title}</div>
+                                <span style={styles.timeChip}>{timeRange}</span>
                               </div>
 
-                              {ev.location ? <div style={{ opacity: 0.8 }}>📍 {ev.location}</div> : null}
-                              {ev.notes ? <div style={{ opacity: 0.85, whiteSpace: "pre-wrap" }}>{ev.notes}</div> : null}
+                              <div style={styles.eventChipsRow}>
+                                {ev.location ? <span style={styles.grayChip}>📍 {ev.location}</span> : null}
+                                {d?.title ? <span style={styles.grayChip}>Deal: {d.title}</span> : null}
+                              </div>
 
-                              <div style={{ display: "flex", flexWrap: "wrap", gap: 10, fontSize: 13, opacity: 0.95 }}>
+                              {ev.notes ? (
+                                <div style={{ opacity: 0.9, whiteSpace: "pre-wrap", lineHeight: 1.5, marginTop: 8 }}>
+                                  {ev.notes}
+                                </div>
+                              ) : null}
+
+                              <div style={styles.metaRow}>
                                 <div>
-                                  <span style={{ opacity: 0.75 }}>Contact:</span>{" "}
+                                  <span style={{ opacity: 0.7 }}>Contact:</span>{" "}
                                   {ev.contact_id ? (
                                     <Link href={`/dashboard/contacts/${ev.contact_id}`} style={styles.link}>
                                       {contactName}
@@ -560,27 +637,15 @@ export default function CalendarPage() {
                                   )}
                                 </div>
 
-                                {d?.title ? (
-                                  <div>
-                                    <span style={{ opacity: 0.75 }}>Deal:</span>{" "}
-                                    <span style={{ fontWeight: 900 }}>{d.title}</span>
-                                  </div>
-                                ) : null}
+                                <div style={{ opacity: 0.7 }}>
+                                  Updated: {ev.updated_at ? new Date(ev.updated_at).toLocaleString() : "—"}
+                                </div>
                               </div>
                             </div>
 
                             <button onClick={() => deleteEvent(ev.id)} style={styles.btnDanger} type="button">
                               Delete
                             </button>
-                          </div>
-
-                          <div style={styles.itemMeta}>
-                            <div style={{ opacity: 0.75 }}>
-                              Created: {ev.created_at ? new Date(ev.created_at).toLocaleString() : "—"}
-                            </div>
-                            <div style={{ opacity: 0.75 }}>
-                              Updated: {ev.updated_at ? new Date(ev.updated_at).toLocaleString() : "—"}
-                            </div>
                           </div>
                         </div>
                       );
@@ -597,20 +662,54 @@ export default function CalendarPage() {
 }
 
 const styles = {
-  header: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 },
+  header: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 },
   headerRight: { display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" },
 
-  h1: { margin: 0, fontSize: 28, fontWeight: 950 },
-  sub: { marginTop: 6, opacity: 0.75 },
+  titleRow: { display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" },
 
-  badge: {
+  h1: { margin: 0, fontSize: 28, fontWeight: 950 },
+  sub: { marginTop: 8, opacity: 0.75 },
+
+  pill: {
     display: "inline-block",
-    padding: "2px 10px",
+    padding: "6px 10px",
     borderRadius: 999,
     border: "1px solid rgba(255,255,255,0.16)",
     background: "rgba(255,255,255,0.06)",
     fontWeight: 900,
     fontSize: 12,
+  },
+
+  countPill: {
+    padding: "6px 10px",
+    borderRadius: 999,
+    border: "1px solid rgba(255,255,255,0.14)",
+    background: "rgba(255,255,255,0.05)",
+    fontWeight: 900,
+    fontSize: 12,
+  },
+
+  timeChip: {
+    display: "inline-block",
+    padding: "6px 10px",
+    borderRadius: 999,
+    border: "1px solid rgba(255,255,255,0.16)",
+    background: "rgba(255,255,255,0.06)",
+    fontWeight: 900,
+    fontSize: 12,
+    whiteSpace: "nowrap",
+  },
+
+  grayChip: {
+    display: "inline-block",
+    padding: "6px 10px",
+    borderRadius: 999,
+    border: "1px solid rgba(255,255,255,0.12)",
+    background: "rgba(255,255,255,0.04)",
+    fontWeight: 850,
+    fontSize: 12,
+    opacity: 0.95,
+    whiteSpace: "nowrap",
   },
 
   h2: { margin: 0, fontSize: 18, fontWeight: 900 },
@@ -622,6 +721,8 @@ const styles = {
     borderRadius: 16,
     background: "#111111",
   },
+
+  cardTop: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" },
 
   cardHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 },
 
@@ -701,6 +802,7 @@ const styles = {
     cursor: "pointer",
     fontWeight: 950,
     height: "fit-content",
+    whiteSpace: "nowrap",
   },
 
   alert: {
@@ -714,7 +816,6 @@ const styles = {
   },
 
   dayGroup: {
-    marginTop: 14,
     padding: 16,
     borderRadius: 16,
     border: "1px solid #242424",
@@ -730,25 +831,37 @@ const styles = {
     borderBottom: "1px solid #242424",
   },
 
-  item: {
+  eventCard: {
     padding: 14,
     borderRadius: 16,
-    border: "1px solid #242424",
-    background: "#111111",
-    display: "grid",
-    gap: 10,
+    border: "1px solid rgba(255,255,255,0.10)",
+    background: "rgba(255,255,255,0.03)",
   },
 
-  itemMeta: {
+  eventTop: { display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" },
+
+  eventTitleRow: {
+    display: "flex",
+    gap: 10,
+    alignItems: "center",
+    justifyContent: "space-between",
+    flexWrap: "wrap",
+  },
+
+  eventTitle: { fontWeight: 950, fontSize: 16 },
+
+  eventChipsRow: { display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" },
+
+  metaRow: {
+    marginTop: 10,
     display: "flex",
     justifyContent: "space-between",
-    alignItems: "center",
     gap: 12,
-    paddingTop: 8,
-    borderTop: "1px solid #242424",
-    opacity: 0.95,
-    fontSize: 13,
     flexWrap: "wrap",
+    fontSize: 13,
+    opacity: 0.95,
+    paddingTop: 10,
+    borderTop: "1px solid rgba(255,255,255,0.10)",
   },
 
   link: { color: "white", fontWeight: 950, textDecoration: "underline" },
