@@ -4,8 +4,16 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { supabaseBrowser } from "@/lib/supabase/browser";
 
+// ✅ Soft gating imports
+import { useSubscription } from "@/lib/subscription/useSubscription";
+import UpgradeBanner from "@/components/UpgradeBanner";
+
 export default function ContactsPage() {
   const sb = useMemo(() => supabaseBrowser(), []);
+
+  // ✅ Subscription (soft gating)
+  const { loading: subLoading, access, plan } = useSubscription();
+  const canCreate = !subLoading && access;
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -56,6 +64,12 @@ export default function ContactsPage() {
   async function addContact(e) {
     e.preventDefault();
     setErr("");
+
+    // ✅ Soft gating: block create, but still allow viewing
+    if (!canCreate) {
+      setErr("Upgrade required to add new contacts.");
+      return;
+    }
 
     const first = form.first_name.trim();
     const last = form.last_name.trim();
@@ -122,10 +136,8 @@ export default function ContactsPage() {
     // Optional realtime sync (only works if you enabled replication for these tables)
     const channel = sb
       .channel("contacts-changes")
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "contacts" },
-        () => loadContacts()
+      .on("postgres_changes", { event: "*", schema: "public", table: "contacts" }, () =>
+        loadContacts()
       )
       .subscribe();
 
@@ -140,13 +152,29 @@ export default function ContactsPage() {
       <div style={styles.header}>
         <div>
           <h1 style={styles.h1}>Contacts</h1>
-          <p style={styles.sub}>Add and manage your CRM contacts (Synced to Supabase).</p>
+          <p style={styles.sub}>
+            Add and manage your CRM contacts (Synced to Supabase).
+            {" "}
+            <span style={{ opacity: 0.9 }}>
+              {subLoading ? "Checking plan…" : `Plan: ${plan || "Free"}`}
+            </span>
+          </p>
         </div>
 
         <button onClick={loadContacts} disabled={loading} style={styles.btnGhost}>
           {loading ? "Refreshing..." : "Refresh"}
         </button>
       </div>
+
+      {/* ✅ Upgrade banner only when access is disabled */}
+      {!subLoading && !access ? (
+        <div style={{ marginTop: 14 }}>
+          <UpgradeBanner
+            title="Upgrade to add contacts"
+            body="You can still view your existing contacts, but adding new contacts requires an active plan."
+          />
+        </div>
+      ) : null}
 
       {err ? (
         <div style={styles.alert}>
@@ -165,12 +193,14 @@ export default function ContactsPage() {
               onChange={(e) => setForm((p) => ({ ...p, first_name: e.target.value }))}
               placeholder="First name"
               style={styles.input}
+              disabled={!canCreate || saving}
             />
             <input
               value={form.last_name}
               onChange={(e) => setForm((p) => ({ ...p, last_name: e.target.value }))}
               placeholder="Last name"
               style={styles.input}
+              disabled={!canCreate || saving}
             />
           </div>
 
@@ -180,18 +210,41 @@ export default function ContactsPage() {
               onChange={(e) => setForm((p) => ({ ...p, email: e.target.value }))}
               placeholder="Email"
               style={styles.input}
+              disabled={!canCreate || saving}
             />
             <input
               value={form.phone}
               onChange={(e) => setForm((p) => ({ ...p, phone: e.target.value }))}
               placeholder="Phone"
               style={styles.input}
+              disabled={!canCreate || saving}
             />
           </div>
 
-          <button type="submit" disabled={saving} style={styles.btnPrimary}>
-            {saving ? "Saving..." : "Add Contact"}
+          <button
+            type="submit"
+            disabled={!canCreate || saving}
+            style={{
+              ...styles.btnPrimary,
+              ...( !canCreate
+                ? {
+                    opacity: 0.55,
+                    cursor: "not-allowed",
+                    border: "1px solid #2a2a2a",
+                    background: "#141414",
+                    color: "#bdbdbd",
+                  }
+                : {}),
+            }}
+          >
+            {subLoading ? "Checking plan…" : saving ? "Saving..." : "Add Contact"}
           </button>
+
+          {!subLoading && !access ? (
+            <div style={{ opacity: 0.7, fontSize: 13 }}>
+              Adding contacts is disabled until you upgrade.
+            </div>
+          ) : null}
         </form>
       </div>
 
