@@ -30,10 +30,30 @@ function GoogleIcon() {
   );
 }
 
+function normalizeEmail(s) {
+  return String(s || "").trim().toLowerCase();
+}
+
+function parseAllowlist(raw) {
+  // env format: "a@b.com, c@d.com"
+  const set = new Set();
+  String(raw || "")
+    .split(",")
+    .map((x) => normalizeEmail(x))
+    .filter(Boolean)
+    .forEach((x) => set.add(x));
+  return set;
+}
+
 function SignupInner() {
   const router = useRouter();
   const sp = useSearchParams();
   const sb = useMemo(() => supabaseBrowser(), []);
+
+  // ✅ Beta Mode + allowlist (no helpers)
+  const isBeta = process.env.NEXT_PUBLIC_BETA_MODE === "true";
+  const allowlist = useMemo(() => parseAllowlist(process.env.NEXT_PUBLIC_BETA_ALLOWLIST), []);
+  const allowlistEnabled = isBeta && allowlist.size > 0;
 
   const redirectTo = useMemo(() => {
     const r = sp.get("redirectTo") || sp.get("next");
@@ -48,6 +68,11 @@ function SignupInner() {
   const [error, setError] = useState("");
   const [ok, setOk] = useState("");
 
+  function isAllowedEmail(candidate) {
+    if (!allowlistEnabled) return true; // not enabled → let anyone sign up
+    return allowlist.has(normalizeEmail(candidate));
+  }
+
   async function onSubmit(e) {
     e.preventDefault();
     setError("");
@@ -57,6 +82,13 @@ function SignupInner() {
       setError("Please enter an email and password.");
       return;
     }
+
+    // ✅ Invite-only beta check (email/password)
+    if (!isAllowedEmail(email)) {
+      setError("Vexta Beta is invite-only. This email is not on the allowlist.");
+      return;
+    }
+
     if (password.length < 6) {
       setError("Password must be at least 6 characters.");
       return;
@@ -93,6 +125,16 @@ function SignupInner() {
   async function signUpWithGoogle() {
     setError("");
     setOk("");
+
+    // ✅ Invite-only beta check (Google)
+    // We need the email to validate, but Google OAuth happens before we get it.
+    // So: in allowlist mode we require them to use email/password signup,
+    // OR they can email you to be added. This keeps beta tight & simple.
+    if (allowlistEnabled) {
+      setError("Vexta Beta is invite-only. Please sign up with email/password using an approved email.");
+      return;
+    }
+
     setOauthLoading(true);
 
     try {
@@ -132,7 +174,15 @@ function SignupInner() {
           </Link>
 
           <h1 className="h1">Create your account</h1>
-          <p className="p">Start managing your pipeline in one place.</p>
+          <p className="p">
+            {isBeta ? "Beta access is limited while we test stability." : "Start managing your pipeline in one place."}
+          </p>
+
+          {allowlistEnabled ? (
+            <div className="hint">
+              Invite-only beta is enabled. Use an approved email to create an account.
+            </div>
+          ) : null}
 
           {error ? <div className="error">{error}</div> : null}
           {ok ? <div className="ok">{ok}</div> : null}
@@ -142,6 +192,7 @@ function SignupInner() {
             className="btn btnPrimary btnFull"
             onClick={signUpWithGoogle}
             disabled={loading || oauthLoading}
+            title={allowlistEnabled ? "Google signup disabled in invite-only beta" : "Continue with Google"}
           >
             <GoogleIcon />
             {oauthLoading ? "Connecting..." : "Continue with Google"}
@@ -178,11 +229,7 @@ function SignupInner() {
               />
             </label>
 
-            <button
-              type="submit"
-              className="btn btnGhost btnFull"
-              disabled={loading || oauthLoading}
-            >
+            <button type="submit" className="btn btnGhost btnFull" disabled={loading || oauthLoading}>
               {loading ? "Creating..." : "Create account"}
             </button>
           </form>
@@ -264,6 +311,17 @@ function SignupInner() {
           margin: 8px 0 0;
           color: rgba(255, 255, 255, 0.65);
           font-size: 13px;
+        }
+        .hint {
+          margin-top: 12px;
+          border-radius: 14px;
+          border: 1px solid rgba(255, 255, 255, 0.14);
+          background: rgba(255, 255, 255, 0.05);
+          color: rgba(255, 255, 255, 0.88);
+          padding: 12px;
+          font-weight: 850;
+          font-size: 13px;
+          line-height: 1.35;
         }
         .error {
           margin-top: 12px;
