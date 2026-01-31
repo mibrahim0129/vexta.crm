@@ -12,9 +12,14 @@ export default function TasksPage() {
   const sb = useMemo(() => supabaseBrowser(), []);
   const mountedRef = useRef(false);
 
+  // ✅ Beta Mode toggle (no helpers)
+  const isBeta = process.env.NEXT_PUBLIC_BETA_MODE === "true";
+
   // ✅ Subscription (soft gating)
   const { loading: subLoading, access, plan } = useSubscription();
-  const canWrite = !subLoading && !!access;
+
+  // ✅ In beta: everything is enabled
+  const canWrite = isBeta ? true : !subLoading && !!access;
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -121,6 +126,9 @@ export default function TasksPage() {
   }
 
   function requireWriteOrWarn(message) {
+    // ✅ Beta: always allow
+    if (isBeta) return true;
+
     if (subLoading) {
       setErr("Checking your plan… please try again.");
       return false;
@@ -367,7 +375,8 @@ export default function TasksPage() {
     const overdueFlag = isOverdue(t.due_at, t.completed);
     const todayFlag = !overdueFlag && isToday(t.due_at);
 
-    const disableWrites = !canWrite || subLoading;
+    // ✅ In beta: never disable writes because of subscription
+    const disableWrites = isBeta ? false : !canWrite || subLoading;
 
     return (
       <div key={t.id} style={styles.item}>
@@ -380,7 +389,11 @@ export default function TasksPage() {
                 ...(disableWrites ? { opacity: 0.55, cursor: "not-allowed" } : {}),
               }}
               title={
-                subLoading
+                isBeta
+                  ? t.completed
+                    ? "Mark as open"
+                    : "Mark as done"
+                  : subLoading
                   ? "Checking plan…"
                   : !canWrite
                   ? "Upgrade required"
@@ -437,11 +450,13 @@ export default function TasksPage() {
             onClick={() => deleteTask(t.id)}
             style={{
               ...styles.btnDanger,
-              ...(subLoading || !canWrite ? { opacity: 0.55, cursor: "not-allowed" } : {}),
+              ...(disableWrites ? { opacity: 0.55, cursor: "not-allowed" } : {}),
             }}
             type="button"
-            disabled={subLoading || !canWrite}
-            title={subLoading ? "Checking plan…" : !canWrite ? "Upgrade required" : "Delete task"}
+            disabled={disableWrites}
+            title={
+              isBeta ? "Delete task" : subLoading ? "Checking plan…" : !canWrite ? "Upgrade required" : "Delete task"
+            }
           >
             Delete
           </button>
@@ -470,7 +485,7 @@ export default function TasksPage() {
           <p style={styles.sub}>
             Daily to-dos • Realtime: <span style={styles.badge}>{rtStatus}</span>{" "}
             <span style={{ opacity: 0.85 }}>
-              {subLoading ? " • Checking plan…" : ` • Plan: ${plan || "Free"}`}
+              {isBeta ? " • Beta Mode (all features unlocked)" : subLoading ? " • Checking plan…" : ` • Plan: ${plan || "Free"}`}
             </span>
           </p>
         </div>
@@ -482,8 +497,8 @@ export default function TasksPage() {
         </div>
       </div>
 
-      {/* ✅ Upgrade banner */}
-      {!subLoading && !access ? (
+      {/* ✅ Upgrade banner (disabled in beta) */}
+      {!isBeta && !subLoading && !access ? (
         <div style={{ marginTop: 14 }}>
           <UpgradeBanner
             title="Upgrade to use tasks"
@@ -575,7 +590,7 @@ export default function TasksPage() {
                 : {}),
             }}
           >
-            {subLoading ? "Checking plan…" : saving ? "Saving..." : "Add Task"}
+            {isBeta ? (saving ? "Saving..." : "Add Task") : subLoading ? "Checking plan…" : saving ? "Saving..." : "Add Task"}
           </button>
 
           {!hasContacts ? (
@@ -588,7 +603,8 @@ export default function TasksPage() {
             </div>
           ) : null}
 
-          {hasContacts && !subLoading && !access ? (
+          {/* Beta: no upgrade warning */}
+          {!isBeta && hasContacts && !subLoading && !access ? (
             <div style={{ marginTop: 6, opacity: 0.75, fontSize: 12 }}>
               Creating/completing/deleting tasks is disabled until you upgrade.
             </div>
