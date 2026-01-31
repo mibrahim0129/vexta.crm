@@ -50,9 +50,7 @@ export default function DashboardLayout({ children }) {
 
       if (error) {
         // Don't redirect on a transient read error; show a clear message.
-        setGateError(
-          "We couldn’t verify your subscription right now. Please refresh in a moment."
-        );
+        setGateError("We couldn’t verify your subscription right now. Please refresh in a moment.");
         return;
       }
 
@@ -139,11 +137,10 @@ export default function DashboardLayout({ children }) {
     { href: "/dashboard/notes", label: "Notes" },
     { href: "/dashboard/tasks", label: "Tasks" },
     { href: "/dashboard/calendar", label: "Calendar" },
+    { href: "/dashboard/feedback", label: "Feedback" },
   ];
 
-  const filteredNav = nav.filter((n) =>
-    n.label.toLowerCase().includes(q.trim().toLowerCase())
-  );
+  const filteredNav = nav.filter((n) => n.label.toLowerCase().includes(q.trim().toLowerCase()));
 
   // ✅ block UI until auth + subscription access are confirmed
   if (!authReady || !accessReady) {
@@ -159,15 +156,11 @@ export default function DashboardLayout({ children }) {
         }}
       >
         <div style={{ textAlign: "center", maxWidth: 520 }}>
-          <div style={{ fontWeight: 950, opacity: 0.9, fontSize: 16 }}>
-            {authReady ? "Checking access…" : "Loading…"}
-          </div>
+          <div style={{ fontWeight: 950, opacity: 0.9, fontSize: 16 }}>{authReady ? "Checking access…" : "Loading…"}</div>
 
           {gateError ? (
             <>
-              <div style={{ marginTop: 10, opacity: 0.8, fontWeight: 700 }}>
-                {gateError}
-              </div>
+              <div style={{ marginTop: 10, opacity: 0.8, fontWeight: 700 }}>{gateError}</div>
               <button
                 onClick={() => window.location.reload()}
                 style={{
@@ -208,11 +201,7 @@ export default function DashboardLayout({ children }) {
             </div>
           ) : null}
 
-          <button
-            onClick={() => setCollapsed((v) => !v)}
-            style={styles.collapseBtn}
-            title={collapsed ? "Expand" : "Collapse"}
-          >
+          <button onClick={() => setCollapsed((v) => !v)} style={styles.collapseBtn} title={collapsed ? "Expand" : "Collapse"}>
             {collapsed ? "»" : "«"}
           </button>
         </div>
@@ -228,10 +217,7 @@ export default function DashboardLayout({ children }) {
 
         <nav style={styles.nav}>
           {(q.trim() ? filteredNav : nav).map((item) => {
-            const active =
-              item.href === "/dashboard"
-                ? pathname === "/dashboard"
-                : pathname?.startsWith(item.href);
+            const active = item.href === "/dashboard" ? pathname === "/dashboard" : pathname?.startsWith(item.href);
 
             return (
               <Link
@@ -263,30 +249,24 @@ export default function DashboardLayout({ children }) {
             ) : null}
           </div>
 
-          {!collapsed ? (
-            <div style={styles.sideHint}>
-              Tip: Open a contact → manage everything from one place.
-            </div>
-          ) : null}
+          {!collapsed ? <div style={styles.sideHint}>Tip: Open a contact → manage everything from one place.</div> : null}
         </div>
       </aside>
 
       <div style={styles.main}>
         <div style={styles.topbar}>
           <div style={styles.topbarLeft}>
-            <div style={styles.breadcrumb}>
-              {pathname?.replace("/dashboard", "Dashboard") || "Dashboard"}
-            </div>
+            <div style={styles.breadcrumb}>{pathname?.replace("/dashboard", "Dashboard") || "Dashboard"}</div>
           </div>
 
           <div style={styles.topbarRight}>
+            <Link href="/dashboard/feedback" style={styles.topBtn}>
+              Feedback
+            </Link>
             <Link href="/dashboard/settings" style={styles.topBtn}>
               Settings
             </Link>
-            <button
-              onClick={logout}
-              style={{ ...styles.topBtn, ...styles.topBtnDanger }}
-            >
+            <button onClick={logout} style={{ ...styles.topBtn, ...styles.topBtnDanger }}>
               Logout
             </button>
           </div>
