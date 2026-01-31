@@ -14,7 +14,7 @@ export default function CalendarPage() {
 
   // ✅ Subscription (soft gating)
   const { loading: subLoading, access, plan } = useSubscription();
-  const canWrite = !subLoading && access;
+  const canWrite = !subLoading && !!access;
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -49,6 +49,18 @@ export default function CalendarPage() {
       return null;
     }
     return data.session;
+  }
+
+  function requireWriteOrWarn(message) {
+    if (subLoading) {
+      setErr("Checking your plan… please try again.");
+      return false;
+    }
+    if (!canWrite) {
+      setErr(message || "Upgrade required.");
+      return false;
+    }
+    return true;
   }
 
   function startOfTodayLocal() {
@@ -124,7 +136,7 @@ export default function CalendarPage() {
   async function loadContacts() {
     const { data, error } = await sb
       .from("contacts")
-      .select("id, first_name, last_name")
+      .select("id, first_name, last_name, created_at")
       .order("created_at", { ascending: false });
 
     if (error) throw error;
@@ -132,13 +144,14 @@ export default function CalendarPage() {
     const list = Array.isArray(data) ? data : [];
     setContacts(list);
 
-    if (!form.contact_id && list.length > 0) {
-      setForm((p) => ({ ...p, contact_id: list[0].id }));
-    }
+    setForm((p) => {
+      if (p.contact_id) return p;
+      return list.length > 0 ? { ...p, contact_id: list[0].id } : p;
+    });
   }
 
   async function loadDeals(contactIdForDeals) {
-    let q = sb.from("deals").select("id, title, contact_id").order("created_at", { ascending: false });
+    let q = sb.from("deals").select("id, title, contact_id, created_at").order("created_at", { ascending: false });
 
     if (contactIdForDeals && contactIdForDeals !== "all") {
       q = q.eq("contact_id", contactIdForDeals);
@@ -162,19 +175,19 @@ export default function CalendarPage() {
         .from("calendar_events")
         .select(
           `
-          id,
-          title,
-          location,
-          start_at,
-          end_at,
-          notes,
-          contact_id,
-          deal_id,
-          created_at,
-          updated_at,
-          contacts:contact_id ( id, first_name, last_name ),
-          deals:deal_id ( id, title )
-        `
+            id,
+            title,
+            location,
+            start_at,
+            end_at,
+            notes,
+            contact_id,
+            deal_id,
+            created_at,
+            updated_at,
+            contacts:contact_id ( id, first_name, last_name ),
+            deals:deal_id ( id, title )
+          `
         )
         .order("start_at", { ascending: true });
 
@@ -212,11 +225,7 @@ export default function CalendarPage() {
     e.preventDefault();
     setErr("");
 
-    // ✅ Soft gating
-    if (!canWrite) {
-      setErr("Upgrade required to add calendar events.");
-      return;
-    }
+    if (!requireWriteOrWarn("Upgrade required to add calendar events.")) return;
 
     const title = (form.title || "").trim();
     if (!title) return setErr("Event title can’t be empty.");
@@ -250,19 +259,19 @@ export default function CalendarPage() {
         .insert([payload])
         .select(
           `
-          id,
-          title,
-          location,
-          start_at,
-          end_at,
-          notes,
-          contact_id,
-          deal_id,
-          created_at,
-          updated_at,
-          contacts:contact_id ( id, first_name, last_name ),
-          deals:deal_id ( id, title )
-        `
+            id,
+            title,
+            location,
+            start_at,
+            end_at,
+            notes,
+            contact_id,
+            deal_id,
+            created_at,
+            updated_at,
+            contacts:contact_id ( id, first_name, last_name ),
+            deals:deal_id ( id, title )
+          `
         )
         .single();
 
@@ -280,6 +289,9 @@ export default function CalendarPage() {
 
   async function deleteEvent(eventId) {
     setErr("");
+
+    if (!requireWriteOrWarn("Upgrade required to delete calendar events.")) return;
+
     const ok = confirm("Delete this event?");
     if (!ok) return;
 
@@ -301,6 +313,11 @@ export default function CalendarPage() {
   useEffect(() => {
     (async () => {
       await loadDeals(filterContactId === "all" ? form.contact_id : filterContactId);
+      // Keep deal filter valid
+      if (filterDealId !== "all" && filterContactId !== "all") {
+        const d = deals.find((x) => x.id === filterDealId);
+        if (d && d.contact_id !== filterContactId) setFilterDealId("all");
+      }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filterContactId]);
@@ -324,27 +341,29 @@ export default function CalendarPage() {
   useEffect(() => {
     mountedRef.current = true;
 
+    let channel;
+
     (async () => {
       await loadAll();
 
-      const channel = sb.channel("calendar-rt");
+      channel = sb.channel("calendar-rt");
       channel
         .on("postgres_changes", { event: "*", schema: "public", table: "calendar_events" }, () => {
           if (mountedRef.current) loadEvents();
         })
         .on("postgres_changes", { event: "*", schema: "public", table: "contacts" }, () => {
-          if (mountedRef.current) loadAll();
+          if (mountedRef.current) loadContacts();
         })
         .on("postgres_changes", { event: "*", schema: "public", table: "deals" }, () => {
-          if (mountedRef.current) loadAll();
+          if (mountedRef.current) loadDeals(filterContactId === "all" ? form.contact_id : filterContactId);
         })
         .subscribe((status) => setRtStatus(String(status || "").toLowerCase()));
-
-      return () => {
-        mountedRef.current = false;
-        sb.removeChannel(channel);
-      };
     })();
+
+    return () => {
+      mountedRef.current = false;
+      if (channel) sb.removeChannel(channel);
+    };
 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -375,6 +394,8 @@ export default function CalendarPage() {
   const hasContacts = contacts.length > 0;
   const canCreate = hasContacts && canWrite;
 
+  const disableWrites = subLoading || !canWrite;
+
   return (
     <div>
       <div style={styles.header}>
@@ -382,16 +403,16 @@ export default function CalendarPage() {
           <div style={styles.titleRow}>
             <h1 style={styles.h1}>Calendar</h1>
 
-            <span style={styles.pill}>
-              {subLoading ? "Checking plan…" : `Plan: ${plan || "Free"}`}
-            </span>
+            <span style={styles.pill}>{subLoading ? "Checking plan…" : `Plan: ${plan || "Free"}`}</span>
 
             <span style={styles.pill}>
               Realtime: <span style={{ fontWeight: 950 }}>{rtStatus}</span>
             </span>
+
+            <span style={styles.pillMuted}>{loading ? "Loading…" : `${filteredEvents.length} events`}</span>
           </div>
 
-          <p style={styles.sub}>List view for appointments, showings, calls, and deadlines.</p>
+          <p style={styles.sub}>Appointments, showings, calls, and deadlines — organized by day.</p>
         </div>
 
         <div style={styles.headerRight}>
@@ -406,7 +427,7 @@ export default function CalendarPage() {
         <div style={{ marginTop: 14 }}>
           <UpgradeBanner
             title="Upgrade to use calendar"
-            body="You can view events, but creating new events requires an active plan."
+            body="You can view events, but creating and deleting events requires an active plan."
           />
         </div>
       ) : null}
@@ -417,11 +438,7 @@ export default function CalendarPage() {
       <div style={styles.card}>
         <div style={styles.cardTop}>
           <h2 style={styles.h2}>Add Event</h2>
-          {!subLoading && !access ? (
-            <div style={{ fontSize: 12, opacity: 0.8 }}>
-              Creating events is disabled until you upgrade.
-            </div>
-          ) : null}
+          {!subLoading && !access ? <div style={{ fontSize: 12, opacity: 0.8 }}>Writes are disabled until upgrade.</div> : null}
         </div>
 
         <form onSubmit={addEvent} style={styles.form}>
@@ -511,7 +528,7 @@ export default function CalendarPage() {
             disabled={!canCreate || saving}
             style={{
               ...styles.btnPrimary,
-              ...(!canWrite
+              ...(disableWrites
                 ? {
                     opacity: 0.55,
                     cursor: "not-allowed",
@@ -643,7 +660,16 @@ export default function CalendarPage() {
                               </div>
                             </div>
 
-                            <button onClick={() => deleteEvent(ev.id)} style={styles.btnDanger} type="button">
+                            <button
+                              onClick={() => deleteEvent(ev.id)}
+                              style={{
+                                ...styles.btnDanger,
+                                ...(disableWrites ? { opacity: 0.55, cursor: "not-allowed" } : {}),
+                              }}
+                              type="button"
+                              disabled={disableWrites}
+                              title={subLoading ? "Checking plan…" : !canWrite ? "Upgrade required" : "Delete event"}
+                            >
                               Delete
                             </button>
                           </div>
@@ -678,6 +704,17 @@ const styles = {
     background: "rgba(255,255,255,0.06)",
     fontWeight: 900,
     fontSize: 12,
+  },
+
+  pillMuted: {
+    display: "inline-block",
+    padding: "6px 10px",
+    borderRadius: 999,
+    border: "1px solid rgba(255,255,255,0.12)",
+    background: "rgba(255,255,255,0.04)",
+    fontWeight: 900,
+    fontSize: 12,
+    opacity: 0.9,
   },
 
   countPill: {
