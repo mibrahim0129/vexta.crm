@@ -14,7 +14,7 @@ export default function TasksPage() {
 
   // ✅ Subscription (soft gating)
   const { loading: subLoading, access, plan } = useSubscription();
-  const canWrite = !subLoading && access;
+  const canWrite = !subLoading && !!access;
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -120,6 +120,18 @@ export default function TasksPage() {
     return next;
   }
 
+  function requireWriteOrWarn(message) {
+    if (subLoading) {
+      setErr("Checking your plan… please try again.");
+      return false;
+    }
+    if (!canWrite) {
+      setErr(message || "Upgrade required.");
+      return false;
+    }
+    return true;
+  }
+
   async function loadContacts() {
     const { data, error } = await sb
       .from("contacts")
@@ -130,9 +142,10 @@ export default function TasksPage() {
     const list = Array.isArray(data) ? data : [];
     setContacts(list);
 
-    if (!form.contact_id && list.length > 0) {
-      setForm((p) => ({ ...p, contact_id: list[0].id }));
-    }
+    setForm((p) => {
+      if (p.contact_id) return p;
+      return list.length > 0 ? { ...p, contact_id: list[0].id } : p;
+    });
   }
 
   async function loadDeals() {
@@ -185,11 +198,7 @@ export default function TasksPage() {
     e.preventDefault();
     setErr("");
 
-    // ✅ Soft gating
-    if (!canWrite) {
-      setErr("Upgrade required to add tasks.");
-      return;
-    }
+    if (!requireWriteOrWarn("Upgrade required to add tasks.")) return;
 
     const title = (form.title || "").trim();
     if (!title) return setErr("Task title can’t be empty.");
@@ -228,11 +237,7 @@ export default function TasksPage() {
   async function toggleTask(t) {
     setErr("");
 
-    // ✅ Soft gating
-    if (!canWrite) {
-      setErr("Upgrade required to update tasks.");
-      return;
-    }
+    if (!requireWriteOrWarn("Upgrade required to complete tasks.")) return;
 
     try {
       const session = await requireSession();
@@ -255,6 +260,9 @@ export default function TasksPage() {
 
   async function deleteTask(id) {
     setErr("");
+
+    if (!requireWriteOrWarn("Upgrade required to delete tasks.")) return;
+
     const ok = confirm("Delete this task?");
     if (!ok) return;
 
@@ -324,15 +332,12 @@ export default function TasksPage() {
 
   const filteredTasks = tasks
     .filter((t) => {
-      // Status
       if (filterStatus === "open" && t.completed) return false;
       if (filterStatus === "completed" && !t.completed) return false;
 
-      // Contact / Deal
       if (filterContactId !== "all" && t.contact_id !== filterContactId) return false;
       if (filterDealId !== "all" && t.deal_id !== filterDealId) return false;
 
-      // Due
       if (filterDue === "today" && !isToday(t.due_at)) return false;
       if (filterDue === "overdue" && !isOverdue(t.due_at, t.completed)) return false;
       if (filterDue === "next7" && !isWithinNext7Days(t.due_at, t.completed)) return false;
@@ -362,16 +367,29 @@ export default function TasksPage() {
     const overdueFlag = isOverdue(t.due_at, t.completed);
     const todayFlag = !overdueFlag && isToday(t.due_at);
 
+    const disableWrites = !canWrite || subLoading;
+
     return (
       <div key={t.id} style={styles.item}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
           <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
             <button
               onClick={() => toggleTask(t)}
-              style={t.completed ? styles.chkOn : styles.chkOff}
-              title={!canWrite ? "Upgrade required" : t.completed ? "Mark as open" : "Mark as done"}
+              style={{
+                ...(t.completed ? styles.chkOn : styles.chkOff),
+                ...(disableWrites ? { opacity: 0.55, cursor: "not-allowed" } : {}),
+              }}
+              title={
+                subLoading
+                  ? "Checking plan…"
+                  : !canWrite
+                  ? "Upgrade required"
+                  : t.completed
+                  ? "Mark as open"
+                  : "Mark as done"
+              }
               type="button"
-              disabled={!canWrite}
+              disabled={disableWrites}
             />
             <div style={{ display: "grid", gap: 6, minWidth: 0 }}>
               <div
@@ -415,7 +433,16 @@ export default function TasksPage() {
             </div>
           </div>
 
-          <button onClick={() => deleteTask(t.id)} style={styles.btnDanger} type="button">
+          <button
+            onClick={() => deleteTask(t.id)}
+            style={{
+              ...styles.btnDanger,
+              ...(subLoading || !canWrite ? { opacity: 0.55, cursor: "not-allowed" } : {}),
+            }}
+            type="button"
+            disabled={subLoading || !canWrite}
+            title={subLoading ? "Checking plan…" : !canWrite ? "Upgrade required" : "Delete task"}
+          >
             Delete
           </button>
         </div>
@@ -441,8 +468,7 @@ export default function TasksPage() {
         <div>
           <h1 style={styles.h1}>Tasks</h1>
           <p style={styles.sub}>
-            Daily to-dos • Realtime: <span style={styles.badge}>{rtStatus}</span>
-            {" "}
+            Daily to-dos • Realtime: <span style={styles.badge}>{rtStatus}</span>{" "}
             <span style={{ opacity: 0.85 }}>
               {subLoading ? " • Checking plan…" : ` • Plan: ${plan || "Free"}`}
             </span>
@@ -461,7 +487,7 @@ export default function TasksPage() {
         <div style={{ marginTop: 14 }}>
           <UpgradeBanner
             title="Upgrade to use tasks"
-            body="You can view tasks, but creating or completing tasks requires an active plan."
+            body="You can view tasks, but creating, completing, and deleting tasks requires an active plan."
           />
         </div>
       ) : null}
@@ -538,7 +564,7 @@ export default function TasksPage() {
             disabled={!canCreate || saving}
             style={{
               ...styles.btnPrimary,
-              ...( !canWrite
+              ...(!canWrite || subLoading
                 ? {
                     opacity: 0.55,
                     cursor: "not-allowed",
@@ -564,7 +590,7 @@ export default function TasksPage() {
 
           {hasContacts && !subLoading && !access ? (
             <div style={{ marginTop: 6, opacity: 0.75, fontSize: 12 }}>
-              Creating/completing tasks is disabled until you upgrade.
+              Creating/completing/deleting tasks is disabled until you upgrade.
             </div>
           ) : null}
         </form>
@@ -590,7 +616,11 @@ export default function TasksPage() {
             <option value="next7">Next 7 days</option>
           </select>
 
-          <select value={filterContactId} onChange={(e) => setFilterContactId(e.target.value)} style={styles.selectSmall}>
+          <select
+            value={filterContactId}
+            onChange={(e) => setFilterContactId(e.target.value)}
+            style={styles.selectSmall}
+          >
             <option value="all">All contacts</option>
             {contacts.map((c) => (
               <option key={c.id} value={c.id}>
