@@ -12,9 +12,14 @@ export default function CalendarPage() {
   const sb = useMemo(() => supabaseBrowser(), []);
   const mountedRef = useRef(false);
 
+  // ✅ Beta Mode toggle (no helpers)
+  const isBeta = process.env.NEXT_PUBLIC_BETA_MODE === "true";
+
   // ✅ Subscription (soft gating)
   const { loading: subLoading, access, plan } = useSubscription();
-  const canWrite = !subLoading && !!access;
+
+  // ✅ In beta: everything is enabled
+  const canWrite = isBeta ? true : !subLoading && !!access;
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -52,6 +57,9 @@ export default function CalendarPage() {
   }
 
   function requireWriteOrWarn(message) {
+    // ✅ Beta: always allow
+    if (isBeta) return true;
+
     if (subLoading) {
       setErr("Checking your plan… please try again.");
       return false;
@@ -394,7 +402,8 @@ export default function CalendarPage() {
   const hasContacts = contacts.length > 0;
   const canCreate = hasContacts && canWrite;
 
-  const disableWrites = subLoading || !canWrite;
+  // ✅ In beta: never disable writes because of subscription
+  const disableWrites = isBeta ? false : subLoading || !canWrite;
 
   return (
     <div>
@@ -403,7 +412,9 @@ export default function CalendarPage() {
           <div style={styles.titleRow}>
             <h1 style={styles.h1}>Calendar</h1>
 
-            <span style={styles.pill}>{subLoading ? "Checking plan…" : `Plan: ${plan || "Free"}`}</span>
+            <span style={styles.pill}>
+              {isBeta ? "Beta Mode (all features unlocked)" : subLoading ? "Checking plan…" : `Plan: ${plan || "Free"}`}
+            </span>
 
             <span style={styles.pill}>
               Realtime: <span style={{ fontWeight: 950 }}>{rtStatus}</span>
@@ -422,8 +433,8 @@ export default function CalendarPage() {
         </div>
       </div>
 
-      {/* ✅ Upgrade banner */}
-      {!subLoading && !access ? (
+      {/* ✅ Upgrade banner (disabled in beta) */}
+      {!isBeta && !subLoading && !access ? (
         <div style={{ marginTop: 14 }}>
           <UpgradeBanner
             title="Upgrade to use calendar"
@@ -438,7 +449,9 @@ export default function CalendarPage() {
       <div style={styles.card}>
         <div style={styles.cardTop}>
           <h2 style={styles.h2}>Add Event</h2>
-          {!subLoading && !access ? <div style={{ fontSize: 12, opacity: 0.8 }}>Writes are disabled until upgrade.</div> : null}
+          {!isBeta && !subLoading && !access ? (
+            <div style={{ fontSize: 12, opacity: 0.8 }}>Writes are disabled until upgrade.</div>
+          ) : null}
         </div>
 
         <form onSubmit={addEvent} style={styles.form}>
@@ -539,7 +552,7 @@ export default function CalendarPage() {
                 : {}),
             }}
           >
-            {subLoading ? "Checking plan…" : saving ? "Saving..." : "Add Event"}
+            {isBeta ? (saving ? "Saving..." : "Add Event") : subLoading ? "Checking plan…" : saving ? "Saving..." : "Add Event"}
           </button>
 
           {!hasContacts ? (
@@ -668,7 +681,7 @@ export default function CalendarPage() {
                               }}
                               type="button"
                               disabled={disableWrites}
-                              title={subLoading ? "Checking plan…" : !canWrite ? "Upgrade required" : "Delete event"}
+                              title={isBeta ? "Delete event" : subLoading ? "Checking plan…" : !canWrite ? "Upgrade required" : "Delete event"}
                             >
                               Delete
                             </button>
