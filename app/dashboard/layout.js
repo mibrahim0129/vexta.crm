@@ -16,53 +16,31 @@ export default function DashboardLayout({ children }) {
   const [q, setQ] = useState("");
 
   const [authReady, setAuthReady] = useState(false);
-  const [accessReady, setAccessReady] = useState(false);
   const [gateError, setGateError] = useState("");
+
+  // ✅ Mobile support
+  const [isMobile, setIsMobile] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
+
+  useEffect(() => {
+    const onResize = () => setIsMobile(window.innerWidth < 960);
+    onResize();
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  // Close drawer when route changes
+  useEffect(() => {
+    setMobileOpen(false);
+  }, [pathname]);
 
   useEffect(() => {
     let alive = true;
     let unsubscribeAuth = null;
 
-    const okStatuses = new Set(["active", "trialing", "past_due"]); // remove past_due if you don't want grace
-
-    async function fetchBestSubscriptionStatus(userId) {
-      // IMPORTANT: you said you have multiple rows sometimes.
-      // Do NOT use maybeSingle() without ordering; grab the latest row.
-      const { data, error } = await sb
-        .from("subscriptions")
-        .select("status, created_at")
-        .eq("user_id", userId)
-        .order("created_at", { ascending: false })
-        .limit(1);
-
-      if (error) return { status: null, error };
-      const status = data?.[0]?.status || null;
-      return { status, error: null };
-    }
-
-    async function checkAccess(userId) {
-      setGateError("");
-      setAccessReady(false);
-
-      const { status, error } = await fetchBestSubscriptionStatus(userId);
-
-      if (!alive) return;
-
-      if (error) {
-        // Don't redirect on a transient read error; show a clear message.
-        setGateError("We couldn’t verify your subscription right now. Please refresh in a moment.");
-        return;
-      }
-
-      if (!status || !okStatuses.has(status)) {
-        router.replace("/pricing");
-        return;
-      }
-
-      setAccessReady(true);
-    }
-
     async function boot() {
+      setGateError("");
+
       // 1) Quick check
       const { data } = await sb.auth.getSession();
       if (!alive) return;
@@ -71,7 +49,6 @@ export default function DashboardLayout({ children }) {
         const session = data.session;
         setEmail(session.user?.email || "");
         setAuthReady(true);
-        await checkAccess(session.user.id);
         return;
       }
 
@@ -83,7 +60,6 @@ export default function DashboardLayout({ children }) {
 
         if (session) {
           setAuthReady(true);
-          await checkAccess(session.user.id);
           return;
         }
 
@@ -103,7 +79,6 @@ export default function DashboardLayout({ children }) {
           const session = again.session;
           setEmail(session.user?.email || "");
           setAuthReady(true);
-          await checkAccess(session.user.id);
           return;
         }
 
@@ -137,43 +112,36 @@ export default function DashboardLayout({ children }) {
     { href: "/dashboard/notes", label: "Notes" },
     { href: "/dashboard/tasks", label: "Tasks" },
     { href: "/dashboard/calendar", label: "Calendar" },
-    { href: "/dashboard/feedback", label: "Feedback" },
   ];
 
   const filteredNav = nav.filter((n) => n.label.toLowerCase().includes(q.trim().toLowerCase()));
 
-  // ✅ block UI until auth + subscription access are confirmed
-  if (!authReady || !accessReady) {
+  function pageLabelFromPath(p) {
+    if (!p) return "Dashboard";
+    if (p === "/dashboard") return "Overview";
+    if (p.startsWith("/dashboard/contacts")) return "Contacts";
+    if (p.startsWith("/dashboard/deals")) return "Deals";
+    if (p.startsWith("/dashboard/notes")) return "Notes";
+    if (p.startsWith("/dashboard/tasks")) return "Tasks";
+    if (p.startsWith("/dashboard/calendar")) return "Calendar";
+    if (p.startsWith("/dashboard/settings")) return "Settings";
+    if (p.startsWith("/dashboard/admin")) return "Admin";
+    return "Dashboard";
+  }
+
+  const breadcrumb = pageLabelFromPath(pathname);
+
+  // ✅ Only block UI until auth is confirmed (NO subscription gate here)
+  if (!authReady) {
     return (
-      <div
-        style={{
-          minHeight: "100vh",
-          background: "#0b0b0b",
-          color: "white",
-          display: "grid",
-          placeItems: "center",
-          padding: 24,
-        }}
-      >
+      <div style={styles.gate}>
         <div style={{ textAlign: "center", maxWidth: 520 }}>
-          <div style={{ fontWeight: 950, opacity: 0.9, fontSize: 16 }}>{authReady ? "Checking access…" : "Loading…"}</div>
+          <div style={{ fontWeight: 950, opacity: 0.9, fontSize: 16 }}>Loading…</div>
 
           {gateError ? (
             <>
               <div style={{ marginTop: 10, opacity: 0.8, fontWeight: 700 }}>{gateError}</div>
-              <button
-                onClick={() => window.location.reload()}
-                style={{
-                  marginTop: 14,
-                  padding: "10px 14px",
-                  borderRadius: 12,
-                  border: "1px solid rgba(255,255,255,0.16)",
-                  background: "rgba(255,255,255,0.06)",
-                  color: "white",
-                  fontWeight: 900,
-                  cursor: "pointer",
-                }}
-              >
+              <button onClick={() => window.location.reload()} style={styles.gateBtn} type="button">
                 Refresh
               </button>
             </>
@@ -183,41 +151,71 @@ export default function DashboardLayout({ children }) {
     );
   }
 
-  return (
-    <div style={styles.shell}>
+  function Sidebar({ mode }) {
+    const isDrawer = mode === "drawer";
+    const showSearch = !collapsed || isDrawer;
+
+    return (
       <aside
         style={{
           ...styles.sidebar,
-          width: collapsed ? 84 : 260,
-          transition: "width 180ms ease",
+          ...(isDrawer
+            ? styles.drawer
+            : {
+                width: collapsed ? 84 : 260,
+                transition: "width 180ms ease",
+                position: "sticky",
+                top: 0,
+                height: "100vh",
+              }),
         }}
       >
         <div style={styles.brand}>
           <div style={styles.logo}>V</div>
-          {!collapsed ? (
+
+          {!collapsed || isDrawer ? (
             <div style={{ minWidth: 0 }}>
               <div style={styles.brandName}>Vexta</div>
               <div style={styles.brandSub}>CRM Dashboard</div>
             </div>
           ) : null}
 
-          <button onClick={() => setCollapsed((v) => !v)} style={styles.collapseBtn} title={collapsed ? "Expand" : "Collapse"}>
-            {collapsed ? "»" : "«"}
-          </button>
+          {isDrawer ? (
+            <button
+              onClick={() => setMobileOpen(false)}
+              style={styles.drawerClose}
+              title="Close"
+              type="button"
+            >
+              ✕
+            </button>
+          ) : (
+            <button
+              onClick={() => setCollapsed((v) => !v)}
+              style={styles.collapseBtn}
+              title={collapsed ? "Expand" : "Collapse"}
+              type="button"
+            >
+              {collapsed ? "»" : "«"}
+            </button>
+          )}
         </div>
 
-        <div style={styles.searchWrap}>
-          <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder={collapsed ? "Search…" : "Search pages…"}
-            style={styles.search}
-          />
-        </div>
+        {showSearch ? (
+          <div style={styles.searchWrap}>
+            <input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder={isDrawer ? "Search pages…" : collapsed ? "Search…" : "Search pages…"}
+              style={styles.search}
+            />
+          </div>
+        ) : null}
 
         <nav style={styles.nav}>
           {(q.trim() ? filteredNav : nav).map((item) => {
-            const active = item.href === "/dashboard" ? pathname === "/dashboard" : pathname?.startsWith(item.href);
+            const active =
+              item.href === "/dashboard" ? pathname === "/dashboard" : pathname?.startsWith(item.href);
 
             return (
               <Link
@@ -226,11 +224,11 @@ export default function DashboardLayout({ children }) {
                 style={{
                   ...styles.navItem,
                   ...(active ? styles.navItemActive : {}),
-                  justifyContent: collapsed ? "center" : "flex-start",
+                  justifyContent: collapsed && !isDrawer ? "center" : "flex-start",
                 }}
-                title={collapsed ? item.label : undefined}
+                title={collapsed && !isDrawer ? item.label : undefined}
               >
-                {!collapsed ? item.label : item.label[0]}
+                {collapsed && !isDrawer ? item.label[0] : item.label}
               </Link>
             );
           })}
@@ -239,7 +237,7 @@ export default function DashboardLayout({ children }) {
         <div style={styles.sidebarBottom}>
           <div style={styles.userBlock}>
             <div style={styles.userDot} />
-            {!collapsed ? (
+            {!collapsed || isDrawer ? (
               <div style={{ minWidth: 0 }}>
                 <div style={styles.userLabel}>Signed in</div>
                 <div style={styles.userEmail} title={email}>
@@ -249,24 +247,65 @@ export default function DashboardLayout({ children }) {
             ) : null}
           </div>
 
-          {!collapsed ? <div style={styles.sideHint}>Tip: Open a contact → manage everything from one place.</div> : null}
+          {!collapsed || isDrawer ? (
+            <div style={styles.sideHint}>Tip: Open a contact → manage everything from one place.</div>
+          ) : null}
         </div>
       </aside>
+    );
+  }
+
+  return (
+    <div style={styles.shell}>
+      {/* Desktop sidebar */}
+      {!isMobile ? <Sidebar mode="desktop" /> : null}
+
+      {/* Mobile drawer */}
+      {isMobile ? (
+        <>
+          <div
+            style={{
+              ...styles.overlay,
+              opacity: mobileOpen ? 1 : 0,
+              pointerEvents: mobileOpen ? "auto" : "none",
+            }}
+            onClick={() => setMobileOpen(false)}
+          />
+          <div
+            style={{
+              ...styles.drawerWrap,
+              transform: mobileOpen ? "translateX(0)" : "translateX(-110%)",
+            }}
+          >
+            <Sidebar mode="drawer" />
+          </div>
+        </>
+      ) : null}
 
       <div style={styles.main}>
         <div style={styles.topbar}>
           <div style={styles.topbarLeft}>
-            <div style={styles.breadcrumb}>{pathname?.replace("/dashboard", "Dashboard") || "Dashboard"}</div>
+            <button
+              onClick={() => setMobileOpen(true)}
+              style={{ ...styles.mobileMenuBtn, display: isMobile ? "inline-flex" : "none" }}
+              title="Menu"
+              type="button"
+            >
+              ☰
+            </button>
+
+            <div style={styles.breadcrumb}>
+              <span style={{ opacity: 0.7 }}>Dashboard</span>
+              <span style={{ opacity: 0.35 }}> / </span>
+              <span style={{ fontWeight: 950 }}>{breadcrumb}</span>
+            </div>
           </div>
 
           <div style={styles.topbarRight}>
-            <Link href="/dashboard/feedback" style={styles.topBtn}>
-              Feedback
-            </Link>
             <Link href="/dashboard/settings" style={styles.topBtn}>
               Settings
             </Link>
-            <button onClick={logout} style={{ ...styles.topBtn, ...styles.topBtnDanger }}>
+            <button onClick={logout} style={{ ...styles.topBtn, ...styles.topBtnDanger }} type="button">
               Logout
             </button>
           </div>
@@ -288,6 +327,28 @@ const styles = {
     display: "grid",
     gridTemplateColumns: "auto 1fr",
   },
+
+  // Gate screen
+  gate: {
+    minHeight: "100vh",
+    background: "#0b0b0b",
+    color: "white",
+    display: "grid",
+    placeItems: "center",
+    padding: 24,
+  },
+  gateBtn: {
+    marginTop: 14,
+    padding: "10px 14px",
+    borderRadius: 12,
+    border: "1px solid rgba(255,255,255,0.16)",
+    background: "rgba(255,255,255,0.06)",
+    color: "white",
+    fontWeight: 900,
+    cursor: "pointer",
+  },
+
+  // Sidebar
   sidebar: {
     borderRight: "1px solid #1f1f1f",
     background: "#0f0f0f",
@@ -296,6 +357,7 @@ const styles = {
     flexDirection: "column",
     gap: 12,
   },
+
   brand: {
     display: "flex",
     alignItems: "center",
@@ -319,6 +381,7 @@ const styles = {
   },
   brandName: { fontWeight: 950, fontSize: 16, lineHeight: 1.1 },
   brandSub: { fontSize: 12, opacity: 0.7, marginTop: 2 },
+
   collapseBtn: {
     marginLeft: "auto",
     borderRadius: 10,
@@ -329,6 +392,18 @@ const styles = {
     cursor: "pointer",
     padding: "6px 10px",
   },
+
+  drawerClose: {
+    marginLeft: "auto",
+    borderRadius: 10,
+    border: "1px solid rgba(255,255,255,0.14)",
+    background: "rgba(255,255,255,0.06)",
+    color: "white",
+    fontWeight: 950,
+    cursor: "pointer",
+    padding: "6px 10px",
+  },
+
   searchWrap: {
     borderRadius: 14,
     border: "1px solid #1f1f1f",
@@ -346,6 +421,7 @@ const styles = {
     fontWeight: 800,
     fontSize: 13,
   },
+
   nav: { display: "grid", gap: 8, marginTop: 2 },
   navItem: {
     padding: "10px 12px",
@@ -365,6 +441,7 @@ const styles = {
     border: "1px solid rgba(255,255,255,0.18)",
     opacity: 1,
   },
+
   sidebarBottom: { marginTop: "auto", display: "grid", gap: 10 },
   userBlock: {
     display: "flex",
@@ -402,7 +479,9 @@ const styles = {
     border: "1px solid #1f1f1f",
     background: "#0f0f0f",
   },
-  main: { display: "flex", flexDirection: "column" },
+
+  // Main area
+  main: { display: "flex", flexDirection: "column", minWidth: 0 },
   topbar: {
     height: 60,
     borderBottom: "1px solid #1f1f1f",
@@ -416,9 +495,16 @@ const styles = {
     top: 0,
     zIndex: 50,
   },
-  topbarLeft: { display: "flex", alignItems: "center", gap: 10 },
-  breadcrumb: { fontWeight: 950, opacity: 0.9 },
+  topbarLeft: { display: "flex", alignItems: "center", gap: 10, minWidth: 0 },
+  breadcrumb: {
+    fontWeight: 950,
+    opacity: 0.9,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  },
   topbarRight: { display: "flex", gap: 10 },
+
   topBtn: {
     padding: "8px 12px",
     borderRadius: 999,
@@ -435,6 +521,42 @@ const styles = {
     background: "rgba(239,68,68,0.10)",
     color: "#fecaca",
   },
-  content: { padding: 18 },
+
+  content: { padding: 18, minWidth: 0 },
   container: { maxWidth: 1100, margin: "0 auto", width: "100%" },
+
+  // Mobile
+  mobileMenuBtn: {
+    padding: "8px 10px",
+    borderRadius: 10,
+    border: "1px solid rgba(255,255,255,0.16)",
+    background: "rgba(255,255,255,0.06)",
+    color: "white",
+    fontWeight: 900,
+    cursor: "pointer",
+    lineHeight: 1,
+  },
+
+  overlay: {
+    position: "fixed",
+    inset: 0,
+    background: "rgba(0,0,0,0.55)",
+    zIndex: 80,
+    transition: "opacity 160ms ease",
+  },
+
+  drawerWrap: {
+    position: "fixed",
+    top: 0,
+    left: 0,
+    bottom: 0,
+    width: 300,
+    zIndex: 90,
+    transition: "transform 180ms ease",
+  },
+
+  drawer: {
+    width: "100%",
+    height: "100%",
+  },
 };
