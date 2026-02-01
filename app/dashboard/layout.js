@@ -75,60 +75,17 @@ export default function DashboardLayout({ children }) {
     let unsubscribeAuth = null;
 
     async function boot() {
-      setGateError("");
+      try {
+        setGateError("");
 
-      const betaOpen = process.env.NEXT_PUBLIC_BETA_MODE === "true";
+        const betaOpen = process.env.NEXT_PUBLIC_BETA_MODE === "true";
 
-      // 1) Quick check
-      const { data } = await sb.auth.getSession();
-      if (!alive) return;
-
-      if (data?.session) {
-        const session = data.session;
-        const userEmail = session.user?.email || "";
-        setEmail(userEmail);
-
-        // ✅ Beta gating: when beta is closed, only allow allowlisted/admin emails
-        if (!betaOpen && !isAllowedEmail(userEmail)) {
-          router.replace("/beta-closed");
-          return;
-        }
-
-        setAuthReady(true);
-        return;
-      }
-
-      // 2) Listen (OAuth callback may still be finalizing session storage)
-      const { data: sub } = sb.auth.onAuthStateChange(async (_event, session) => {
+        // 1) Quick check
+        const { data } = await sb.auth.getSession();
         if (!alive) return;
 
-        const userEmail = session?.user?.email || "";
-        setEmail(userEmail);
-
-        if (session) {
-          // ✅ Beta gating: when beta is closed, only allow allowlisted/admin emails
-          if (!betaOpen && !isAllowedEmail(userEmail)) {
-            router.replace("/beta-closed");
-            return;
-          }
-
-          setAuthReady(true);
-          return;
-        }
-
-        const next = pathname ? pathname : "/dashboard";
-        router.replace(`/login?next=${encodeURIComponent(next)}`);
-      });
-
-      unsubscribeAuth = () => sub?.subscription?.unsubscribe?.();
-
-      // 3) Re-check after a short delay; only then redirect if still no session
-      setTimeout(async () => {
-        if (!alive) return;
-
-        const { data: again } = await sb.auth.getSession();
-        if (again?.session) {
-          const session = again.session;
+        if (data?.session) {
+          const session = data.session;
           const userEmail = session.user?.email || "";
           setEmail(userEmail);
 
@@ -142,9 +99,61 @@ export default function DashboardLayout({ children }) {
           return;
         }
 
-        const next = pathname ? pathname : "/dashboard";
-        router.replace(`/login?next=${encodeURIComponent(next)}`);
-      }, 400);
+        // 2) Listen (OAuth callback may still be finalizing session storage)
+        const { data: sub } = sb.auth.onAuthStateChange(async (_event, session) => {
+          if (!alive) return;
+
+          const userEmail = session?.user?.email || "";
+          setEmail(userEmail);
+
+          if (session) {
+            // ✅ Beta gating: when beta is closed, only allow allowlisted/admin emails
+            if (!betaOpen && !isAllowedEmail(userEmail)) {
+              router.replace("/beta-closed");
+              return;
+            }
+
+            setAuthReady(true);
+            return;
+          }
+
+          const next = pathname ? pathname : "/dashboard";
+          router.replace(`/login?next=${encodeURIComponent(next)}`);
+        });
+
+        unsubscribeAuth = () => sub?.subscription?.unsubscribe?.();
+
+        // 3) Re-check after a short delay; only then redirect if still no session
+        setTimeout(async () => {
+          try {
+            if (!alive) return;
+
+            const { data: again } = await sb.auth.getSession();
+            if (again?.session) {
+              const session = again.session;
+              const userEmail = session.user?.email || "";
+              setEmail(userEmail);
+
+              // ✅ Beta gating: when beta is closed, only allow allowlisted/admin emails
+              if (!betaOpen && !isAllowedEmail(userEmail)) {
+                router.replace("/beta-closed");
+                return;
+              }
+
+              setAuthReady(true);
+              return;
+            }
+
+            const next = pathname ? pathname : "/dashboard";
+            router.replace(`/login?next=${encodeURIComponent(next)}`);
+          } catch (e) {
+            const next = pathname ? pathname : "/dashboard";
+            router.replace(`/login?next=${encodeURIComponent(next)}`);
+          }
+        }, 400);
+      } catch (e) {
+        setGateError("Something went wrong while preparing your session.");
+      }
     }
 
     boot();
