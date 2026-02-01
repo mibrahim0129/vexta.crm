@@ -13,12 +13,16 @@ export default function ContactsPage() {
 
   // ✅ Subscription (soft gating)
   const { loading: subLoading, access, plan } = useSubscription();
-  const canCreate = !subLoading && access;
+  const canCreate = !subLoading && !!access;
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState("");
   const [contacts, setContacts] = useState([]);
+
+  // UI filters
+  const [query, setQuery] = useState("");
+  const [sort, setSort] = useState("new"); // new | old | name
 
   const [form, setForm] = useState({
     first_name: "",
@@ -66,13 +70,19 @@ export default function ContactsPage() {
     setErr("");
 
     // ✅ Soft gating: block create, but still allow viewing
+    if (subLoading) {
+      setErr("Checking your plan… please try again.");
+      return;
+    }
     if (!canCreate) {
       setErr("Upgrade required to add new contacts.");
       return;
     }
 
-    const first = form.first_name.trim();
-    const last = form.last_name.trim();
+    const first = (form.first_name || "").trim();
+    const last = (form.last_name || "").trim();
+    const email = (form.email || "").trim();
+    const phone = (form.phone || "").trim();
 
     if (!first && !last) {
       setErr("Please enter at least a first name or last name.");
@@ -91,8 +101,8 @@ export default function ContactsPage() {
             user_id: session.user.id,
             first_name: first || null,
             last_name: last || null,
-            email: form.email.trim() || null,
-            phone: form.phone.trim() || null,
+            email: email || null,
+            phone: phone || null,
           },
         ])
         .select("id, first_name, last_name, email, phone, created_at")
@@ -102,17 +112,27 @@ export default function ContactsPage() {
 
       setContacts((prev) => [data, ...prev]);
       setForm({ first_name: "", last_name: "", email: "", phone: "" });
-    } catch (e) {
-      console.error(e);
-      setErr(e?.message || "Failed to add contact");
+    } catch (e2) {
+      console.error(e2);
+      setErr(e2?.message || "Failed to add contact");
     } finally {
       setSaving(false);
     }
   }
 
-  async function deleteContact(id) {
+  async function deleteContact(id, name) {
     setErr("");
-    const ok = confirm("Delete this contact? This will also delete their notes.");
+
+    if (subLoading) {
+      setErr("Checking your plan… please try again.");
+      return;
+    }
+    if (!canCreate) {
+      setErr("Upgrade required to delete contacts.");
+      return;
+    }
+
+    const ok = confirm(`Delete "${name || "this contact"}"? This may also remove related notes/tasks.`);
     if (!ok) return;
 
     try {
@@ -120,7 +140,6 @@ export default function ContactsPage() {
       if (!session) return;
 
       const { error } = await sb.from("contacts").delete().eq("id", id);
-
       if (error) throw error;
 
       setContacts((prev) => prev.filter((c) => c.id !== id));
@@ -133,12 +152,9 @@ export default function ContactsPage() {
   useEffect(() => {
     loadContacts();
 
-    // Optional realtime sync (only works if you enabled replication for these tables)
     const channel = sb
       .channel("contacts-changes")
-      .on("postgres_changes", { event: "*", schema: "public", table: "contacts" }, () =>
-        loadContacts()
-      )
+      .on("postgres_changes", { event: "*", schema: "public", table: "contacts" }, () => loadContacts())
       .subscribe();
 
     return () => {
@@ -147,23 +163,61 @@ export default function ContactsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  function normalize(s) {
+    return String(s || "").toLowerCase().trim();
+  }
+
+  const filtered = contacts.filter((c) => {
+    const q = normalize(query);
+    if (!q) return true;
+
+    const name = `${c.first_name || ""} ${c.last_name || ""}`.trim();
+    const hay = `${name} ${c.email || ""} ${c.phone || ""}`.toLowerCase();
+    return hay.includes(q);
+  });
+
+  const sorted = [...filtered].sort((a, b) => {
+    if (sort === "old") return String(a.created_at || "").localeCompare(String(b.created_at || ""));
+    if (sort === "name") {
+      const an = normalize(`${a.last_name || ""} ${a.first_name || ""}`) || "zzz";
+      const bn = normalize(`${b.last_name || ""} ${b.first_name || ""}`) || "zzz";
+      return an.localeCompare(bn);
+    }
+    // new (default)
+    return String(b.created_at || "").localeCompare(String(a.created_at || ""));
+  });
+
+  const disableWrites = subLoading || !canCreate;
+
   return (
     <div>
       <div style={styles.header}>
-        <div>
-          <h1 style={styles.h1}>Contacts</h1>
-          <p style={styles.sub}>
-            Add and manage your CRM contacts (Synced to Supabase).
-            {" "}
-            <span style={{ opacity: 0.9 }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={styles.titleRow}>
+            <h1 style={styles.h1}>Contacts</h1>
+
+            <span style={styles.pill}>
               {subLoading ? "Checking plan…" : `Plan: ${plan || "Free"}`}
             </span>
+
+            <span style={styles.pillMuted}>
+              {loading ? "Loading…" : `${sorted.length} shown`}
+            </span>
+          </div>
+
+          <p style={styles.sub}>
+            Store clients, leads, and prospects — then open a contact to manage everything in one place.
           </p>
         </div>
 
-        <button onClick={loadContacts} disabled={loading} style={styles.btnGhost}>
-          {loading ? "Refreshing..." : "Refresh"}
-        </button>
+        <div style={styles.headerRight}>
+          <button onClick={loadContacts} disabled={loading} style={styles.btnGhost} type="button">
+            {loading ? "Refreshing..." : "Refresh"}
+          </button>
+          <Link href="/dashboard/contacts/import" style={styles.btnGhostLink}>
+            Import →
+          </Link>
+        </div>
       </div>
 
       {/* ✅ Upgrade banner only when access is disabled */}
@@ -171,20 +225,42 @@ export default function ContactsPage() {
         <div style={{ marginTop: 14 }}>
           <UpgradeBanner
             title="Upgrade to add contacts"
-            body="You can still view your existing contacts, but adding new contacts requires an active plan."
+            body="You can still view your existing contacts, but creating and deleting contacts requires an active plan."
           />
         </div>
       ) : null}
 
       {err ? (
         <div style={styles.alert}>
-          <div style={{ fontWeight: 900, marginBottom: 4 }}>Heads up</div>
-          <div style={{ opacity: 0.9 }}>{err}</div>
+          <div style={{ fontWeight: 950, marginBottom: 4 }}>Heads up</div>
+          <div style={{ opacity: 0.95 }}>{err}</div>
         </div>
       ) : null}
 
+      {/* Controls */}
+      <div style={styles.controls}>
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search name, email, phone…"
+          style={styles.search}
+        />
+
+        <select value={sort} onChange={(e) => setSort(e.target.value)} style={styles.selectSmall}>
+          <option value="new">Newest</option>
+          <option value="old">Oldest</option>
+          <option value="name">Name</option>
+        </select>
+      </div>
+
+      {/* Add Contact */}
       <div style={styles.card}>
-        <h2 style={styles.h2}>Add Contact</h2>
+        <div style={styles.cardTop}>
+          <h2 style={styles.h2}>Add Contact</h2>
+          {!subLoading && !access ? (
+            <div style={{ fontSize: 12, opacity: 0.8 }}>Writes are disabled until upgrade.</div>
+          ) : null}
+        </div>
 
         <form onSubmit={addContact} style={styles.form}>
           <div style={styles.grid2}>
@@ -193,14 +269,14 @@ export default function ContactsPage() {
               onChange={(e) => setForm((p) => ({ ...p, first_name: e.target.value }))}
               placeholder="First name"
               style={styles.input}
-              disabled={!canCreate || saving}
+              disabled={disableWrites || saving}
             />
             <input
               value={form.last_name}
               onChange={(e) => setForm((p) => ({ ...p, last_name: e.target.value }))}
               placeholder="Last name"
               style={styles.input}
-              disabled={!canCreate || saving}
+              disabled={disableWrites || saving}
             />
           </div>
 
@@ -210,29 +286,29 @@ export default function ContactsPage() {
               onChange={(e) => setForm((p) => ({ ...p, email: e.target.value }))}
               placeholder="Email"
               style={styles.input}
-              disabled={!canCreate || saving}
+              disabled={disableWrites || saving}
             />
             <input
               value={form.phone}
               onChange={(e) => setForm((p) => ({ ...p, phone: e.target.value }))}
               placeholder="Phone"
               style={styles.input}
-              disabled={!canCreate || saving}
+              disabled={disableWrites || saving}
             />
           </div>
 
           <button
             type="submit"
-            disabled={!canCreate || saving}
+            disabled={disableWrites || saving}
             style={{
               ...styles.btnPrimary,
-              ...( !canCreate
+              ...(disableWrites
                 ? {
                     opacity: 0.55,
                     cursor: "not-allowed",
-                    border: "1px solid #2a2a2a",
-                    background: "#141414",
-                    color: "#bdbdbd",
+                    border: "1px solid rgba(255,255,255,0.14)",
+                    background: "rgba(255,255,255,0.06)",
+                    color: "rgba(255,255,255,0.65)",
                   }
                 : {}),
             }}
@@ -242,41 +318,91 @@ export default function ContactsPage() {
 
           {!subLoading && !access ? (
             <div style={{ opacity: 0.7, fontSize: 13 }}>
-              Adding contacts is disabled until you upgrade.
+              Adding/deleting contacts is disabled until you upgrade.
             </div>
           ) : null}
         </form>
       </div>
 
+      {/* List */}
       <div style={{ marginTop: 18 }}>
-        <h2 style={styles.h2}>
-          Your Contacts {loading ? "(loading...)" : `(${contacts.length})`}
-        </h2>
+        <div style={styles.listHeader}>
+          <h2 style={styles.h2}>Your Contacts</h2>
+          <div style={{ opacity: 0.75, fontWeight: 900, fontSize: 13 }}>
+            {loading ? "Loading…" : `${contacts.length} total`}
+          </div>
+        </div>
 
         {loading ? (
           <div style={{ opacity: 0.75 }}>Loading…</div>
         ) : contacts.length === 0 ? (
-          <div style={{ opacity: 0.75 }}>No contacts yet. Add your first one above.</div>
+          <div style={styles.empty}>
+            <div style={{ fontWeight: 950, fontSize: 14 }}>No contacts yet</div>
+            <div style={{ opacity: 0.75, marginTop: 6 }}>
+              Add your first contact above — then open it to track deals, notes, tasks, and events.
+            </div>
+          </div>
+        ) : sorted.length === 0 ? (
+          <div style={{ opacity: 0.75 }}>No contacts match your search.</div>
         ) : (
-          <div style={{ display: "grid", gap: 10 }}>
-            {contacts.map((c) => {
+          <div style={styles.listGrid}>
+            {sorted.map((c) => {
               const name = `${c.first_name || ""} ${c.last_name || ""}`.trim() || "Unnamed";
+              const initials =
+                `${(c.first_name || " ")[0] || ""}${(c.last_name || " ")[0] || ""}`.trim().toUpperCase() || "C";
+
               return (
-                <div key={c.id} style={styles.listItem}>
-                  <div style={{ minWidth: 0 }}>
-                    <Link href={`/dashboard/contacts/${c.id}`} style={styles.nameLink}>
-                      {name}
-                    </Link>
-                    <div style={styles.meta}>
-                      {c.email ? `Email: ${c.email}` : null}
-                      {c.email && c.phone ? " • " : null}
-                      {c.phone ? `Phone: ${c.phone}` : null}
+                <div key={c.id} style={styles.contactCard}>
+                  <div style={styles.cardRow}>
+                    <div style={styles.avatar} aria-hidden="true">
+                      {initials}
+                    </div>
+
+                    <div style={{ minWidth: 0 }}>
+                      <Link href={`/dashboard/contacts/${c.id}`} style={styles.nameLink}>
+                        {name}
+                      </Link>
+
+                      <div style={styles.metaLine}>
+                        {c.email ? (
+                          <span style={styles.metaChip}>
+                            ✉ {c.email}
+                          </span>
+                        ) : null}
+                        {c.phone ? (
+                          <span style={styles.metaChip}>
+                            ☎ {c.phone}
+                          </span>
+                        ) : null}
+                      </div>
+                    </div>
+
+                    <div style={styles.actions}>
+                      <Link href={`/dashboard/contacts/${c.id}`} style={styles.btnMini}>
+                        Open
+                      </Link>
+                      <button
+                        onClick={() => deleteContact(c.id, name)}
+                        style={{
+                          ...styles.btnMini,
+                          ...styles.btnMiniDanger,
+                          ...(disableWrites ? { opacity: 0.55, cursor: "not-allowed" } : {}),
+                        }}
+                        disabled={disableWrites}
+                        type="button"
+                        title={disableWrites ? "Upgrade required" : "Delete contact"}
+                      >
+                        Delete
+                      </button>
                     </div>
                   </div>
 
-                  <button onClick={() => deleteContact(c.id)} style={styles.btnDanger}>
-                    Delete
-                  </button>
+                  <div style={styles.cardFooter}>
+                    <span style={{ opacity: 0.7 }}>
+                      Added: {c.created_at ? new Date(c.created_at).toLocaleDateString() : "—"}
+                    </span>
+                    <span style={styles.footerHint}>Click “Open” to manage everything.</span>
+                  </div>
                 </div>
               );
             })}
@@ -288,30 +414,33 @@ export default function ContactsPage() {
 }
 
 const styles = {
-  header: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 },
-  h1: { margin: 0, fontSize: 28, fontWeight: 950 },
-  sub: { marginTop: 6, opacity: 0.75 },
+  header: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap" },
+  headerRight: { display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" },
+  titleRow: { display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" },
 
-  h2: { margin: 0, fontSize: 18, fontWeight: 900 },
+  h1: { margin: 0, fontSize: 28, fontWeight: 950, letterSpacing: -0.4 },
+  sub: { marginTop: 8, opacity: 0.75, maxWidth: 820 },
 
-  card: {
-    marginTop: 18,
-    padding: 16,
-    border: "1px solid #242424",
-    borderRadius: 16,
-    background: "#111111",
+  pill: {
+    display: "inline-block",
+    padding: "6px 10px",
+    borderRadius: 999,
+    border: "1px solid rgba(255,255,255,0.16)",
+    background: "rgba(255,255,255,0.06)",
+    fontWeight: 900,
+    fontSize: 12,
+    whiteSpace: "nowrap",
   },
-
-  form: { marginTop: 12, display: "grid", gap: 10 },
-  grid2: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 },
-
-  input: {
-    padding: 12,
-    borderRadius: 12,
-    border: "1px solid #2a2a2a",
-    background: "#0f0f0f",
-    color: "white",
-    outline: "none",
+  pillMuted: {
+    display: "inline-block",
+    padding: "6px 10px",
+    borderRadius: 999,
+    border: "1px solid rgba(255,255,255,0.12)",
+    background: "rgba(255,255,255,0.04)",
+    fontWeight: 900,
+    fontSize: 12,
+    opacity: 0.9,
+    whiteSpace: "nowrap",
   },
 
   btnGhost: {
@@ -324,35 +453,134 @@ const styles = {
     fontWeight: 900,
     fontSize: 13,
   },
+  btnGhostLink: {
+    padding: "10px 14px",
+    borderRadius: 999,
+    border: "1px solid rgba(255,255,255,0.16)",
+    background: "rgba(255,255,255,0.06)",
+    color: "white",
+    cursor: "pointer",
+    fontWeight: 900,
+    fontSize: 13,
+    textDecoration: "none",
+  },
+
+  alert: {
+    marginTop: 14,
+    padding: 12,
+    borderRadius: 14,
+    background: "rgba(239,68,68,0.10)",
+    border: "1px solid rgba(239,68,68,0.28)",
+    color: "#fecaca",
+    fontWeight: 850,
+  },
+
+  controls: {
+    marginTop: 14,
+    display: "flex",
+    gap: 10,
+    flexWrap: "wrap",
+    alignItems: "center",
+  },
+  search: {
+    flex: "1 1 280px",
+    padding: "11px 12px",
+    borderRadius: 14,
+    border: "1px solid rgba(255,255,255,0.14)",
+    background: "rgba(255,255,255,0.05)",
+    color: "white",
+    outline: "none",
+    fontWeight: 850,
+  },
+  selectSmall: {
+    padding: "10px 12px",
+    borderRadius: 999,
+    border: "1px solid rgba(255,255,255,0.16)",
+    background: "rgba(255,255,255,0.06)",
+    color: "white",
+    outline: "none",
+    fontWeight: 900,
+    fontSize: 13,
+    cursor: "pointer",
+  },
+
+  h2: { margin: 0, fontSize: 18, fontWeight: 900, letterSpacing: -0.2 },
+
+  card: {
+    marginTop: 18,
+    padding: 16,
+    border: "1px solid rgba(255,255,255,0.10)",
+    borderRadius: 18,
+    background: "rgba(255,255,255,0.04)",
+  },
+  cardTop: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" },
+
+  form: { marginTop: 12, display: "grid", gap: 10 },
+  grid2: { display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10 },
+
+  input: {
+    padding: 12,
+    borderRadius: 14,
+    border: "1px solid rgba(255,255,255,0.12)",
+    background: "rgba(0,0,0,0.22)",
+    color: "white",
+    outline: "none",
+  },
+
   btnPrimary: {
     padding: "12px 14px",
-    borderRadius: 12,
-    border: "1px solid #f5f5f5",
-    background: "#f5f5f5",
+    borderRadius: 14,
+    border: "1px solid rgba(255,255,255,0.12)",
+    background: "white",
     color: "#0b0b0b",
     fontWeight: 950,
     cursor: "pointer",
     width: "fit-content",
   },
-  btnDanger: {
-    padding: "10px 12px",
-    borderRadius: 12,
-    border: "1px solid rgba(239,68,68,0.35)",
-    background: "rgba(239,68,68,0.10)",
-    color: "#fecaca",
-    cursor: "pointer",
-    fontWeight: 950,
+
+  listHeader: { marginTop: 16, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 },
+
+  empty: {
+    marginTop: 12,
+    padding: 16,
+    borderRadius: 18,
+    border: "1px solid rgba(255,255,255,0.10)",
+    background: "rgba(255,255,255,0.03)",
   },
 
-  listItem: {
+  listGrid: {
+    marginTop: 12,
+    display: "grid",
+    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+    gap: 12,
+  },
+
+  contactCard: {
     padding: 14,
-    borderRadius: 16,
-    border: "1px solid #242424",
-    background: "#111111",
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
+    borderRadius: 18,
+    border: "1px solid rgba(255,255,255,0.10)",
+    background: "rgba(255,255,255,0.03)",
+    display: "grid",
     gap: 10,
+  },
+
+  cardRow: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+
+  avatar: {
+    width: 38,
+    height: 38,
+    borderRadius: 14,
+    border: "1px solid rgba(255,255,255,0.14)",
+    background: "rgba(255,255,255,0.10)",
+    display: "grid",
+    placeItems: "center",
+    fontWeight: 950,
+    flexShrink: 0,
   },
 
   nameLink: {
@@ -360,15 +588,58 @@ const styles = {
     fontWeight: 950,
     fontSize: 16,
     textDecoration: "none",
+    letterSpacing: -0.2,
   },
-  meta: { opacity: 0.75, marginTop: 4, fontSize: 13 },
 
-  alert: {
-    marginTop: 14,
-    padding: 12,
-    borderRadius: 12,
-    background: "#1a0f0f",
-    border: "1px solid #5a1f1f",
-    color: "#ffd6d6",
+  metaLine: { marginTop: 6, display: "flex", flexWrap: "wrap", gap: 8 },
+  metaChip: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+    padding: "6px 10px",
+    borderRadius: 999,
+    border: "1px solid rgba(255,255,255,0.12)",
+    background: "rgba(255,255,255,0.04)",
+    fontSize: 12,
+    fontWeight: 850,
+    opacity: 0.95,
+    whiteSpace: "nowrap",
   },
+
+  actions: { display: "flex", gap: 8, alignItems: "center", flexShrink: 0 },
+  btnMini: {
+    padding: "9px 12px",
+    borderRadius: 12,
+    border: "1px solid rgba(255,255,255,0.14)",
+    background: "rgba(255,255,255,0.06)",
+    color: "white",
+    fontWeight: 900,
+    fontSize: 13,
+    textDecoration: "none",
+    cursor: "pointer",
+  },
+  btnMiniDanger: {
+    border: "1px solid rgba(239,68,68,0.35)",
+    background: "rgba(239,68,68,0.10)",
+    color: "#fecaca",
+  },
+
+  cardFooter: {
+    display: "flex",
+    justifyContent: "space-between",
+    gap: 10,
+    flexWrap: "wrap",
+    fontSize: 12,
+    paddingTop: 10,
+    borderTop: "1px solid rgba(255,255,255,0.08)",
+  },
+  footerHint: { opacity: 0.65, fontWeight: 800 },
+
+  // Mobile: make grids stack
+  "@media (max-width: 860px)": {},
 };
+
+// NOTE: Inline styles don’t support media queries directly.
+// If you want true responsive grid switching purely via inline styles,
+// we can switch listGrid/grid2 based on window width like we did in layout.
+// For now, this still looks good because the container shrinks and wraps.
