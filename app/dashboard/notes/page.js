@@ -8,13 +8,26 @@ import { supabaseBrowser } from "@/lib/supabase/browser";
 import { useSubscription } from "@/lib/subscription/useSubscription";
 import UpgradeBanner from "@/components/UpgradeBanner";
 
+function safeName(c) {
+  if (!c) return "Unknown";
+  return `${c.first_name || ""} ${c.last_name || ""}`.trim() || "Unnamed";
+}
+
+function fmtDate(d) {
+  try {
+    return d ? new Date(d).toLocaleString() : "—";
+  } catch {
+    return "—";
+  }
+}
+
 export default function NotesPage() {
   const sb = useMemo(() => supabaseBrowser(), []);
   const mountedRef = useRef(false);
 
   // ✅ Subscription (soft gating)
   const { loading: subLoading, access, plan } = useSubscription();
-  const canWrite = !subLoading && access;
+  const canWrite = !subLoading && !!access;
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -28,6 +41,7 @@ export default function NotesPage() {
 
   // Filters
   const [filterContactId, setFilterContactId] = useState("all");
+  const [query, setQuery] = useState("");
 
   // Form
   const [form, setForm] = useState({
@@ -63,10 +77,9 @@ export default function NotesPage() {
   }
 
   async function loadDeals(contactIdForDeals) {
-    // Load deals optionally filtered by contact (so deal dropdown stays relevant)
     let q = sb
       .from("deals")
-      .select("id, title, contact_id")
+      .select("id, title, contact_id, created_at")
       .order("created_at", { ascending: false });
 
     if (contactIdForDeals && contactIdForDeals !== "all") {
@@ -84,7 +97,6 @@ export default function NotesPage() {
     if (!session) return;
 
     setErr("");
-    setLoading(true);
 
     try {
       let q = sb
@@ -114,8 +126,6 @@ export default function NotesPage() {
       console.error(e);
       setErr(e?.message || "Failed to load notes");
       setNotes([]);
-    } finally {
-      setLoading(false);
     }
   }
 
@@ -141,13 +151,18 @@ export default function NotesPage() {
     e.preventDefault();
     setErr("");
 
+    if (subLoading) {
+      setErr("Checking your plan… please try again.");
+      return;
+    }
+
     // ✅ Soft gating: block create, but still allow viewing
     if (!canWrite) {
       setErr("Upgrade required to add new notes.");
       return;
     }
 
-    const body = form.body.trim();
+    const body = (form.body || "").trim();
     if (!body) {
       setErr("Note can’t be empty.");
       return;
@@ -201,6 +216,16 @@ export default function NotesPage() {
 
   async function deleteNote(noteId) {
     setErr("");
+
+    if (subLoading) {
+      setErr("Checking your plan… please try again.");
+      return;
+    }
+    if (!canWrite) {
+      setErr("Upgrade required to delete notes.");
+      return;
+    }
+
     const ok = confirm("Delete this note?");
     if (!ok) return;
 
@@ -266,42 +291,33 @@ export default function NotesPage() {
   }, []);
 
   const hasContacts = contacts.length > 0;
+  const canCreate = hasContacts && canWrite && !subLoading;
+  const disableWrites = subLoading || !canWrite;
 
-  // ✅ For notes: you must have contacts AND have write access to create
-  const canCreate = hasContacts && canWrite;
+  const normalizedQuery = String(query || "").trim().toLowerCase();
+  const shownNotes = notes.filter((n) => {
+    if (!normalizedQuery) return true;
+    const cName = safeName(n.contacts).toLowerCase();
+    const dTitle = String(n.deals?.title || "").toLowerCase();
+    const body = String(n.body || "").toLowerCase();
+    return `${body} ${cName} ${dTitle}`.includes(normalizedQuery);
+  });
 
   return (
     <div>
       <div style={styles.header}>
-        <div>
-          <h1 style={styles.h1}>Notes</h1>
-          <p style={styles.sub}>
-            Activity log • Realtime: <span style={styles.badge}>{rtStatus}</span>
-            {" "}
-            <span style={{ opacity: 0.85 }}>
-              {subLoading ? " • Checking plan…" : ` • Plan: ${plan || "Free"}`}
-            </span>
-          </p>
+        <div style={{ minWidth: 0 }}>
+          <div style={styles.titleRow}>
+            <h1 style={styles.h1}>Notes</h1>
+            <span style={styles.pill}>Realtime: {rtStatus}</span>
+            <span style={styles.pillMuted}>{subLoading ? "Checking plan…" : `Plan: ${plan || "Free"}`}</span>
+            <span style={styles.pillMuted}>{loading ? "Loading…" : `${shownNotes.length} shown`}</span>
+          </div>
+          <p style={styles.sub}>Your activity log across contacts and deals.</p>
         </div>
 
         <div style={styles.headerRight}>
-          <select
-            value={filterContactId}
-            onChange={(e) => setFilterContactId(e.target.value)}
-            style={styles.selectSmall}
-          >
-            <option value="all">All contacts</option>
-            {contacts.map((c) => {
-              const name = `${c.first_name || ""} ${c.last_name || ""}`.trim() || "Unnamed";
-              return (
-                <option key={c.id} value={c.id}>
-                  {name}
-                </option>
-              );
-            })}
-          </select>
-
-          <button onClick={loadAll} disabled={loading} style={styles.btnGhost}>
+          <button onClick={loadAll} disabled={loading} style={styles.btnGhost} type="button">
             {loading ? "Refreshing..." : "Refresh"}
           </button>
         </div>
@@ -312,15 +328,52 @@ export default function NotesPage() {
         <div style={{ marginTop: 14 }}>
           <UpgradeBanner
             title="Upgrade to add notes"
-            body="You can view your existing notes, but adding new notes requires an active plan."
+            body="You can view your existing notes, but adding or deleting notes requires an active plan."
           />
         </div>
       ) : null}
 
       {err ? <div style={styles.alert}>{err}</div> : null}
 
+      {/* Filters */}
+      <div style={styles.controls}>
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search notes, contacts, or deals…"
+          style={styles.search}
+        />
+
+        <select value={filterContactId} onChange={(e) => setFilterContactId(e.target.value)} style={styles.selectPill}>
+          <option value="all">All contacts</option>
+          {contacts.map((c) => (
+            <option key={c.id} value={c.id}>
+              {safeName(c)}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {/* Add Note */}
       <div style={styles.card}>
-        <h2 style={styles.h2}>Add Note</h2>
+        <div style={styles.cardTop}>
+          <h2 style={styles.h2}>Add Note</h2>
+          <div style={{ fontSize: 12, opacity: 0.8 }}>
+            {!hasContacts ? (
+              <>
+                Add a contact first in{" "}
+                <Link href="/dashboard/contacts" style={{ color: "white", fontWeight: 900 }}>
+                  Contacts
+                </Link>
+                .
+              </>
+            ) : disableWrites ? (
+              "Writes are disabled until upgrade."
+            ) : (
+              "Attach a note to a contact (and optionally a deal)."
+            )}
+          </div>
+        </div>
 
         <form onSubmit={addNote} style={styles.form}>
           <div style={styles.grid2}>
@@ -333,14 +386,11 @@ export default function NotesPage() {
               {contacts.length === 0 ? (
                 <option value="">No contacts found</option>
               ) : (
-                contacts.map((c) => {
-                  const name = `${c.first_name || ""} ${c.last_name || ""}`.trim() || "Unnamed";
-                  return (
-                    <option key={c.id} value={c.id}>
-                      {name}
-                    </option>
-                  );
-                })
+                contacts.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {safeName(c)}
+                  </option>
+                ))
               )}
             </select>
 
@@ -362,97 +412,105 @@ export default function NotesPage() {
           <textarea
             value={form.body}
             onChange={(e) => setForm((p) => ({ ...p, body: e.target.value }))}
-            placeholder="Write your note..."
+            placeholder="Write your note… (next steps, call recap, client preferences, etc.)"
             style={styles.textarea}
             rows={4}
             disabled={!canCreate || saving}
           />
 
-          <button
-            type="submit"
-            disabled={!canCreate || saving}
-            style={{
-              ...styles.btnPrimary,
-              ...( !canWrite
-                ? {
-                    opacity: 0.55,
-                    cursor: "not-allowed",
-                    border: "1px solid #2a2a2a",
-                    background: "#141414",
-                    color: "#bdbdbd",
-                  }
-                : {}),
-            }}
-          >
-            {subLoading ? "Checking plan…" : saving ? "Saving..." : "Add Note"}
-          </button>
+          <div style={styles.formBottom}>
+            <button
+              type="submit"
+              disabled={!canCreate || saving}
+              style={{
+                ...styles.btnPrimary,
+                ...(disableWrites
+                  ? {
+                      opacity: 0.55,
+                      cursor: "not-allowed",
+                      border: "1px solid rgba(255,255,255,0.14)",
+                      background: "rgba(255,255,255,0.06)",
+                      color: "rgba(255,255,255,0.65)",
+                    }
+                  : {}),
+              }}
+            >
+              {subLoading ? "Checking plan…" : saving ? "Saving..." : "Add Note"}
+            </button>
 
-          {!hasContacts ? (
-            <div style={{ marginTop: 6, opacity: 0.75, fontSize: 12 }}>
-              Add a contact first in{" "}
-              <Link href="/dashboard/contacts" style={{ color: "white", fontWeight: 900 }}>
-                Contacts
-              </Link>
-              .
+            <div style={{ fontSize: 12, opacity: 0.7 }}>
+              Tip: Use notes as your running log — you’ll close faster.
             </div>
-          ) : null}
-
-          {hasContacts && !subLoading && !access ? (
-            <div style={{ marginTop: 6, opacity: 0.75, fontSize: 12 }}>
-              Adding notes is disabled until you upgrade.
-            </div>
-          ) : null}
+          </div>
         </form>
       </div>
 
+      {/* Notes list */}
       <div style={{ marginTop: 18 }}>
-        <h2 style={styles.h2}>
-          Notes {loading ? "(loading...)" : `(${notes.length})`}
-        </h2>
+        <div style={styles.listHeader}>
+          <h2 style={styles.h2}>Notes</h2>
+          <div style={{ opacity: 0.75, fontWeight: 900, fontSize: 13 }}>
+            {loading ? "Loading…" : `${notes.length} total`}
+          </div>
+        </div>
 
         {loading ? (
           <div style={{ opacity: 0.75 }}>Loading…</div>
-        ) : notes.length === 0 ? (
-          <div style={{ opacity: 0.75 }}>No notes yet.</div>
+        ) : shownNotes.length === 0 ? (
+          <div style={styles.empty}>
+            <div style={{ fontWeight: 950, fontSize: 14 }}>No notes found</div>
+            <div style={{ opacity: 0.75, marginTop: 6 }}>
+              Try clearing your search/filter, or add your first note above.
+            </div>
+          </div>
         ) : (
-          <div style={{ display: "grid", gap: 10, marginTop: 10 }}>
-            {notes.map((n) => {
+          <div style={styles.listGrid}>
+            {shownNotes.map((n) => {
               const c = n.contacts;
               const d = n.deals;
 
-              const contactName = c
-                ? `${c.first_name || ""} ${c.last_name || ""}`.trim() || "Unnamed"
-                : "Unknown";
+              const contactName = safeName(c);
 
               return (
-                <div key={n.id} style={styles.noteItem}>
-                  <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.5 }}>{n.body}</div>
-
-                  <div style={styles.noteMeta}>
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
-                      <div>
-                        <span style={{ opacity: 0.75 }}>Contact:</span>{" "}
-                        {n.contact_id ? (
-                          <Link href={`/dashboard/contacts/${n.contact_id}`} style={styles.link}>
-                            {contactName}
-                          </Link>
-                        ) : (
-                          <span>{contactName}</span>
-                        )}
-                      </div>
+                <div key={n.id} style={styles.noteCard}>
+                  <div style={styles.noteTop}>
+                    <div style={styles.noteChips}>
+                      <span style={styles.chip}>Contact</span>
+                      {n.contact_id ? (
+                        <Link href={`/dashboard/contacts/${n.contact_id}`} style={styles.contactLink}>
+                          {contactName}
+                        </Link>
+                      ) : (
+                        <span style={{ fontWeight: 900 }}>{contactName}</span>
+                      )}
 
                       {d?.title ? (
-                        <div>
-                          <span style={{ opacity: 0.75 }}>Deal:</span>{" "}
+                        <>
+                          <span style={styles.chipMuted}>Deal</span>
                           <span style={{ fontWeight: 900 }}>{d.title}</span>
-                        </div>
+                        </>
                       ) : null}
                     </div>
 
-                    <button onClick={() => deleteNote(n.id)} style={styles.btnDanger}>
-                      Delete
-                    </button>
+                    <div style={styles.noteRight}>
+                      <span style={styles.time}>{fmtDate(n.created_at)}</span>
+                      <button
+                        onClick={() => deleteNote(n.id)}
+                        style={{
+                          ...styles.btnMini,
+                          ...styles.btnMiniDanger,
+                          ...(disableWrites ? { opacity: 0.55, cursor: "not-allowed" } : {}),
+                        }}
+                        disabled={disableWrites}
+                        type="button"
+                        title={disableWrites ? "Upgrade required" : "Delete note"}
+                      >
+                        Delete
+                      </button>
+                    </div>
                   </div>
+
+                  <div style={styles.body}>{n.body}</div>
                 </div>
               );
             })}
@@ -464,45 +522,57 @@ export default function NotesPage() {
 }
 
 const styles = {
-  header: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 },
-  headerRight: { display: "flex", gap: 10, alignItems: "center" },
+  header: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap" },
+  headerRight: { display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" },
+  titleRow: { display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" },
 
-  h1: { margin: 0, fontSize: 28, fontWeight: 950 },
-  sub: { marginTop: 6, opacity: 0.75 },
+  h1: { margin: 0, fontSize: 28, fontWeight: 950, letterSpacing: -0.4 },
+  sub: { marginTop: 8, opacity: 0.75, maxWidth: 820 },
 
-  badge: {
+  pill: {
     display: "inline-block",
-    padding: "2px 10px",
+    padding: "6px 10px",
     borderRadius: 999,
     border: "1px solid rgba(255,255,255,0.16)",
     background: "rgba(255,255,255,0.06)",
     fontWeight: 900,
     fontSize: 12,
+    whiteSpace: "nowrap",
+  },
+  pillMuted: {
+    display: "inline-block",
+    padding: "6px 10px",
+    borderRadius: 999,
+    border: "1px solid rgba(255,255,255,0.12)",
+    background: "rgba(255,255,255,0.04)",
+    fontWeight: 900,
+    fontSize: 12,
+    opacity: 0.9,
+    whiteSpace: "nowrap",
   },
 
-  h2: { margin: 0, fontSize: 18, fontWeight: 900 },
-
-  card: {
-    marginTop: 18,
-    padding: 16,
-    border: "1px solid #242424",
-    borderRadius: 16,
-    background: "#111111",
-  },
-
-  form: { marginTop: 12, display: "grid", gap: 10 },
-  grid2: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 },
-
-  select: {
+  alert: {
+    marginTop: 14,
     padding: 12,
-    borderRadius: 12,
-    border: "1px solid #2a2a2a",
-    background: "#0f0f0f",
+    borderRadius: 14,
+    background: "rgba(239,68,68,0.10)",
+    border: "1px solid rgba(239,68,68,0.28)",
+    color: "#fecaca",
+    fontWeight: 850,
+  },
+
+  controls: { marginTop: 14, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" },
+  search: {
+    flex: "1 1 260px",
+    padding: "11px 12px",
+    borderRadius: 14,
+    border: "1px solid rgba(255,255,255,0.14)",
+    background: "rgba(255,255,255,0.05)",
     color: "white",
     outline: "none",
+    fontWeight: 850,
   },
-
-  selectSmall: {
+  selectPill: {
     padding: "10px 12px",
     borderRadius: 999,
     border: "1px solid rgba(255,255,255,0.16)",
@@ -512,16 +582,6 @@ const styles = {
     fontWeight: 900,
     fontSize: 13,
     cursor: "pointer",
-  },
-
-  textarea: {
-    padding: 12,
-    borderRadius: 12,
-    border: "1px solid #2a2a2a",
-    background: "#0f0f0f",
-    color: "white",
-    outline: "none",
-    resize: "vertical",
   },
 
   btnGhost: {
@@ -535,57 +595,124 @@ const styles = {
     fontSize: 13,
   },
 
+  h2: { margin: 0, fontSize: 18, fontWeight: 900, letterSpacing: -0.2 },
+
+  card: {
+    marginTop: 18,
+    padding: 16,
+    border: "1px solid rgba(255,255,255,0.10)",
+    borderRadius: 18,
+    background: "rgba(255,255,255,0.04)",
+  },
+  cardTop: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" },
+
+  form: { marginTop: 12, display: "grid", gap: 10 },
+  grid2: { display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10 },
+
+  select: {
+    padding: 12,
+    borderRadius: 14,
+    border: "1px solid rgba(255,255,255,0.12)",
+    background: "rgba(0,0,0,0.22)",
+    color: "white",
+    outline: "none",
+    fontWeight: 850,
+  },
+
+  textarea: {
+    padding: 12,
+    borderRadius: 14,
+    border: "1px solid rgba(255,255,255,0.12)",
+    background: "rgba(0,0,0,0.22)",
+    color: "white",
+    outline: "none",
+    resize: "vertical",
+    lineHeight: 1.5,
+    fontWeight: 650,
+  },
+
+  formBottom: { display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", alignItems: "center" },
+
   btnPrimary: {
     padding: "12px 14px",
-    borderRadius: 12,
-    border: "1px solid #f5f5f5",
-    background: "#f5f5f5",
+    borderRadius: 14,
+    border: "1px solid rgba(255,255,255,0.12)",
+    background: "white",
     color: "#0b0b0b",
     fontWeight: 950,
     cursor: "pointer",
     width: "fit-content",
   },
 
-  btnDanger: {
-    padding: "10px 12px",
+  listHeader: { marginTop: 16, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 },
+
+  empty: {
+    marginTop: 12,
+    padding: 16,
+    borderRadius: 18,
+    border: "1px solid rgba(255,255,255,0.10)",
+    background: "rgba(255,255,255,0.03)",
+  },
+
+  listGrid: { marginTop: 12, display: "grid", gap: 12 },
+
+  noteCard: {
+    padding: 14,
+    borderRadius: 18,
+    border: "1px solid rgba(255,255,255,0.10)",
+    background: "rgba(255,255,255,0.03)",
+  },
+
+  noteTop: { display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start", flexWrap: "wrap" },
+
+  noteChips: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" },
+
+  chip: {
+    display: "inline-flex",
+    alignItems: "center",
+    padding: "6px 10px",
+    borderRadius: 999,
+    border: "1px solid rgba(255,255,255,0.12)",
+    background: "rgba(255,255,255,0.04)",
+    fontSize: 12,
+    fontWeight: 900,
+    opacity: 0.9,
+    whiteSpace: "nowrap",
+  },
+  chipMuted: {
+    display: "inline-flex",
+    alignItems: "center",
+    padding: "6px 10px",
+    borderRadius: 999,
+    border: "1px solid rgba(255,255,255,0.10)",
+    background: "rgba(255,255,255,0.03)",
+    fontSize: 12,
+    fontWeight: 900,
+    opacity: 0.8,
+    whiteSpace: "nowrap",
+  },
+
+  contactLink: { color: "white", fontWeight: 950, textDecoration: "none" },
+
+  noteRight: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" },
+  time: { fontSize: 12, opacity: 0.7, fontWeight: 850, whiteSpace: "nowrap" },
+
+  btnMini: {
+    padding: "9px 12px",
     borderRadius: 12,
+    border: "1px solid rgba(255,255,255,0.14)",
+    background: "rgba(255,255,255,0.06)",
+    color: "white",
+    fontWeight: 900,
+    fontSize: 13,
+    textDecoration: "none",
+    cursor: "pointer",
+  },
+  btnMiniDanger: {
     border: "1px solid rgba(239,68,68,0.35)",
     background: "rgba(239,68,68,0.10)",
     color: "#fecaca",
-    cursor: "pointer",
-    fontWeight: 950,
-    height: "fit-content",
   },
 
-  noteItem: {
-    padding: 14,
-    borderRadius: 16,
-    border: "1px solid #242424",
-    background: "#111111",
-    display: "grid",
-    gap: 10,
-  },
-
-  noteMeta: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    gap: 12,
-    paddingTop: 8,
-    borderTop: "1px solid #242424",
-    opacity: 0.95,
-    fontSize: 13,
-  },
-
-  link: { color: "white", fontWeight: 950, textDecoration: "underline" },
-
-  alert: {
-    marginTop: 14,
-    padding: 12,
-    borderRadius: 12,
-    background: "#1a0f0f",
-    border: "1px solid #5a1f1f",
-    color: "#ffd6d6",
-    fontWeight: 900,
-  },
+  body: { marginTop: 12, whiteSpace: "pre-wrap", lineHeight: 1.55, opacity: 0.95 },
 };
