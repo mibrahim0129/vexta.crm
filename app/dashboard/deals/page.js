@@ -15,24 +15,37 @@ const STATUSES = [
   { value: "closed", label: "Closed" },
 ];
 
+function statusLabel(v) {
+  return STATUSES.find((s) => s.value === v)?.label || "Unknown";
+}
+
+function money(n) {
+  const num = Number(n || 0);
+  if (!Number.isFinite(num)) return "$0";
+  return `$${num.toLocaleString()}`;
+}
+
 export default function DealsPage() {
   const sb = useMemo(() => supabaseBrowser(), []);
   const mountedRef = useRef(false);
 
   // ✅ Subscription (soft gating)
   const { loading: subLoading, access, plan } = useSubscription();
-  const canWrite = !subLoading && access; // gate create + updates
+  const canWrite = !subLoading && !!access;
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [savingId, setSavingId] = useState(""); // deal_id being saved
   const [err, setErr] = useState("");
-
   const [rtStatus, setRtStatus] = useState("connecting");
 
   const [contacts, setContacts] = useState([]);
   const [deals, setDeals] = useState([]);
 
+  // UI filters
   const [filterStatus, setFilterStatus] = useState("all");
+  const [query, setQuery] = useState("");
+  const [sort, setSort] = useState("new"); // new | old | value_desc | value_asc | title
 
   const [form, setForm] = useState({
     contact_id: "",
@@ -43,7 +56,6 @@ export default function DealsPage() {
 
   // Inline edits keyed by deal_id
   const [editMap, setEditMap] = useState({}); // { [id]: { title, value } }
-  const [savingId, setSavingId] = useState(""); // deal_id being saved
 
   async function requireSession() {
     const { data } = await sb.auth.getSession();
@@ -74,9 +86,6 @@ export default function DealsPage() {
     const session = await requireSession();
     if (!session) return;
 
-    setErr("");
-    setLoading(true);
-
     try {
       const { data, error } = await sb
         .from("deals")
@@ -98,7 +107,6 @@ export default function DealsPage() {
       const list = Array.isArray(data) ? data : [];
       setDeals(list);
 
-      // prime editMap
       const m = {};
       for (const d of list) {
         m[d.id] = { title: d.title || "", value: String(d.value ?? 0) };
@@ -108,8 +116,6 @@ export default function DealsPage() {
       console.error(e);
       setErr(e?.message || "Failed to load deals");
       setDeals([]);
-    } finally {
-      setLoading(false);
     }
   }
 
@@ -133,18 +139,20 @@ export default function DealsPage() {
     e.preventDefault();
     setErr("");
 
-    // ✅ Soft gating
+    if (subLoading) {
+      setErr("Checking your plan… please try again.");
+      return;
+    }
     if (!canWrite) {
       setErr("Upgrade required to add new deals.");
       return;
     }
 
-    const title = form.title.trim();
+    const title = (form.title || "").trim();
     if (!title) {
       setErr("Deal title is required.");
       return;
     }
-
     if (!form.contact_id) {
       setErr("Please select a contact.");
       return;
@@ -190,9 +198,9 @@ export default function DealsPage() {
         [data.id]: { title: data.title || "", value: String(data.value ?? 0) },
       }));
       setForm((p) => ({ ...p, title: "", status: "lead", value: "" }));
-    } catch (e) {
-      console.error(e);
-      setErr(e?.message || "Failed to add deal");
+    } catch (e2) {
+      console.error(e2);
+      setErr(e2?.message || "Failed to add deal");
     } finally {
       setSaving(false);
     }
@@ -201,7 +209,10 @@ export default function DealsPage() {
   async function updateDealStatus(dealId, newStatus) {
     setErr("");
 
-    // ✅ Soft gating
+    if (subLoading) {
+      setErr("Checking your plan… please try again.");
+      return;
+    }
     if (!canWrite) {
       setErr("Upgrade required to update deals.");
       return;
@@ -224,7 +235,10 @@ export default function DealsPage() {
   async function saveDealDetails(dealId) {
     setErr("");
 
-    // ✅ Soft gating
+    if (subLoading) {
+      setErr("Checking your plan… please try again.");
+      return;
+    }
     if (!canWrite) {
       setErr("Upgrade required to edit deals.");
       return;
@@ -258,9 +272,19 @@ export default function DealsPage() {
     }
   }
 
-  async function deleteDeal(dealId) {
+  async function deleteDeal(dealId, title) {
     setErr("");
-    const ok = confirm("Delete this deal?");
+
+    if (subLoading) {
+      setErr("Checking your plan… please try again.");
+      return;
+    }
+    if (!canWrite) {
+      setErr("Upgrade required to delete deals.");
+      return;
+    }
+
+    const ok = confirm(`Delete "${title || "this deal"}"?`);
     if (!ok) return;
 
     try {
@@ -307,33 +331,44 @@ export default function DealsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const filteredDeals = filterStatus === "all" ? deals : deals.filter((d) => d.status === filterStatus);
+  const normalizedQuery = String(query || "").trim().toLowerCase();
+
+  const filtered = deals
+    .filter((d) => (filterStatus === "all" ? true : d.status === filterStatus))
+    .filter((d) => {
+      if (!normalizedQuery) return true;
+      const c = d.contacts;
+      const contactName = c ? `${c.first_name || ""} ${c.last_name || ""}`.trim() : "";
+      const hay = `${d.title || ""} ${contactName}`.toLowerCase();
+      return hay.includes(normalizedQuery);
+    });
+
+  const sorted = [...filtered].sort((a, b) => {
+    if (sort === "old") return String(a.created_at || "").localeCompare(String(b.created_at || ""));
+    if (sort === "value_desc") return Number(b.value || 0) - Number(a.value || 0);
+    if (sort === "value_asc") return Number(a.value || 0) - Number(b.value || 0);
+    if (sort === "title") return String(a.title || "").localeCompare(String(b.title || ""));
+    // new
+    return String(b.created_at || "").localeCompare(String(a.created_at || ""));
+  });
+
+  const disableWrites = subLoading || !canWrite;
 
   return (
     <div>
       <div style={styles.header}>
-        <div>
-          <h1 style={styles.h1}>Deals</h1>
-          <p style={styles.sub}>
-            Realtime: <span style={styles.badge}>{rtStatus}</span>
-            {" "}
-            <span style={{ opacity: 0.85 }}>
-              {subLoading ? " • Checking plan…" : ` • Plan: ${plan || "Free"}`}
-            </span>
-          </p>
+        <div style={{ minWidth: 0 }}>
+          <div style={styles.titleRow}>
+            <h1 style={styles.h1}>Deals</h1>
+            <span style={styles.pill}>Realtime: {rtStatus}</span>
+            <span style={styles.pillMuted}>{subLoading ? "Checking plan…" : `Plan: ${plan || "Free"}`}</span>
+            <span style={styles.pillMuted}>{loading ? "Loading…" : `${sorted.length} shown`}</span>
+          </div>
+          <p style={styles.sub}>Track opportunities and move them through your pipeline.</p>
         </div>
 
         <div style={styles.headerRight}>
-          <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} style={styles.selectSmall}>
-            <option value="all">All statuses</option>
-            {STATUSES.map((s) => (
-              <option key={s.value} value={s.value}>
-                {s.label}
-              </option>
-            ))}
-          </select>
-
-          <button onClick={loadAll} disabled={loading} style={styles.btnGhost}>
+          <button onClick={loadAll} disabled={loading} style={styles.btnGhost} type="button">
             {loading ? "Refreshing..." : "Refresh"}
           </button>
         </div>
@@ -344,15 +379,58 @@ export default function DealsPage() {
         <div style={{ marginTop: 14 }}>
           <UpgradeBanner
             title="Upgrade to create & edit deals"
-            body="You can view your deals, but creating or editing deals requires an active plan."
+            body="You can view your deals, but creating, editing, or deleting deals requires an active plan."
           />
         </div>
       ) : null}
 
       {err ? <div style={styles.alert}>{err}</div> : null}
 
+      {/* Controls */}
+      <div style={styles.controls}>
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search deals or contacts…"
+          style={styles.search}
+        />
+
+        <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} style={styles.selectPill}>
+          <option value="all">All statuses</option>
+          {STATUSES.map((s) => (
+            <option key={s.value} value={s.value}>
+              {s.label}
+            </option>
+          ))}
+        </select>
+
+        <select value={sort} onChange={(e) => setSort(e.target.value)} style={styles.selectPill}>
+          <option value="new">Newest</option>
+          <option value="old">Oldest</option>
+          <option value="value_desc">Value (High → Low)</option>
+          <option value="value_asc">Value (Low → High)</option>
+          <option value="title">Title (A → Z)</option>
+        </select>
+      </div>
+
+      {/* Add Deal */}
       <div style={styles.card}>
-        <h2 style={styles.h2}>Add Deal</h2>
+        <div style={styles.cardTop}>
+          <h2 style={styles.h2}>Add Deal</h2>
+          <div style={{ fontSize: 12, opacity: 0.8 }}>
+            {contacts.length === 0 ? (
+              <>
+                Add a contact first in{" "}
+                <Link href="/dashboard/contacts" style={{ color: "white", fontWeight: 900 }}>
+                  Contacts
+                </Link>
+                .
+              </>
+            ) : !subLoading && !access ? (
+              "Writes are disabled until upgrade."
+            ) : null}
+          </div>
+        </div>
 
         <form onSubmit={addDeal} style={styles.form}>
           <div style={styles.grid2}>
@@ -360,7 +438,7 @@ export default function DealsPage() {
               value={form.contact_id}
               onChange={(e) => setForm((p) => ({ ...p, contact_id: e.target.value }))}
               style={styles.select}
-              disabled={!canWrite || saving}
+              disabled={disableWrites || saving}
             >
               {contacts.length === 0 ? (
                 <option value="">No contacts found</option>
@@ -380,7 +458,7 @@ export default function DealsPage() {
               value={form.status}
               onChange={(e) => setForm((p) => ({ ...p, status: e.target.value }))}
               style={styles.select}
-              disabled={!canWrite || saving}
+              disabled={disableWrites || saving}
             >
               {STATUSES.map((s) => (
                 <option key={s.value} value={s.value}>
@@ -393,9 +471,9 @@ export default function DealsPage() {
           <input
             value={form.title}
             onChange={(e) => setForm((p) => ({ ...p, title: e.target.value }))}
-            placeholder="Deal title"
+            placeholder="Deal title (e.g., Buyer: 3BR search)"
             style={styles.input}
-            disabled={!canWrite || saving}
+            disabled={disableWrites || saving}
           />
 
           <div style={styles.grid2}>
@@ -404,21 +482,21 @@ export default function DealsPage() {
               onChange={(e) => setForm((p) => ({ ...p, value: e.target.value }))}
               placeholder="Value ($)"
               style={styles.input}
-              disabled={!canWrite || saving}
+              disabled={disableWrites || saving}
             />
 
             <button
               type="submit"
-              disabled={!canWrite || saving || contacts.length === 0}
+              disabled={disableWrites || saving || contacts.length === 0}
               style={{
                 ...styles.btnPrimary,
-                ...( !canWrite
+                ...(disableWrites
                   ? {
                       opacity: 0.55,
                       cursor: "not-allowed",
-                      border: "1px solid #2a2a2a",
-                      background: "#141414",
-                      color: "#bdbdbd",
+                      border: "1px solid rgba(255,255,255,0.14)",
+                      background: "rgba(255,255,255,0.06)",
+                      color: "rgba(255,255,255,0.65)",
                     }
                   : {}),
               }}
@@ -426,37 +504,30 @@ export default function DealsPage() {
               {subLoading ? "Checking plan…" : saving ? "Saving..." : "Add Deal"}
             </button>
           </div>
-
-          {!subLoading && !access ? (
-            <div style={{ marginTop: 6, opacity: 0.75, fontSize: 12 }}>
-              Creating & editing deals is disabled until you upgrade.
-            </div>
-          ) : null}
-
-          {contacts.length === 0 ? (
-            <div style={{ marginTop: 6, opacity: 0.75, fontSize: 12 }}>
-              Add a contact first in{" "}
-              <Link href="/dashboard/contacts" style={{ color: "white", fontWeight: 900 }}>
-                Contacts
-              </Link>
-              .
-            </div>
-          ) : null}
         </form>
       </div>
 
+      {/* List */}
       <div style={{ marginTop: 18 }}>
-        <h2 style={styles.h2}>
-          Your Deals {loading ? "(loading...)" : `(${filteredDeals.length})`}
-        </h2>
+        <div style={styles.listHeader}>
+          <h2 style={styles.h2}>Your Deals</h2>
+          <div style={{ opacity: 0.75, fontWeight: 900, fontSize: 13 }}>
+            {loading ? "Loading…" : `${deals.length} total`}
+          </div>
+        </div>
 
         {loading ? (
           <div style={{ opacity: 0.75 }}>Loading…</div>
-        ) : filteredDeals.length === 0 ? (
-          <div style={{ opacity: 0.75 }}>No deals yet.</div>
+        ) : sorted.length === 0 ? (
+          <div style={styles.empty}>
+            <div style={{ fontWeight: 950, fontSize: 14 }}>No deals yet</div>
+            <div style={{ opacity: 0.75, marginTop: 6 }}>
+              Add your first deal above — then move it through your pipeline.
+            </div>
+          </div>
         ) : (
-          <div style={{ display: "grid", gap: 10, marginTop: 10 }}>
-            {filteredDeals.map((d) => {
+          <div style={styles.listGrid}>
+            {sorted.map((d) => {
               const c = d.contacts;
               const contactName = c
                 ? `${c.first_name || ""} ${c.last_name || ""}`.trim() || "Unnamed"
@@ -465,86 +536,111 @@ export default function DealsPage() {
               const edit = editMap[d.id] || { title: d.title || "", value: String(d.value ?? 0) };
 
               return (
-                <div key={d.id} style={styles.listItem}>
-                  <div style={{ minWidth: 0, width: "100%" }}>
-                    <div style={styles.rowTop}>
-                      <div style={{ minWidth: 0 }}>
-                        <div style={{ fontWeight: 950, fontSize: 12, opacity: 0.7 }}>Contact</div>
+                <div key={d.id} style={styles.dealCard}>
+                  <div style={styles.cardHead}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={styles.topMeta}>
+                        <span style={styles.chip}>Contact</span>
                         {c ? (
-                          <Link href={`/dashboard/contacts/${d.contact_id}`} style={styles.link}>
+                          <Link href={`/dashboard/contacts/${d.contact_id}`} style={styles.contactLink}>
                             {contactName}
                           </Link>
                         ) : (
-                          <div style={{ fontWeight: 900 }}>{contactName}</div>
+                          <span style={{ fontWeight: 900 }}>{contactName}</span>
                         )}
                       </div>
 
-                      <button onClick={() => deleteDeal(d.id)} style={styles.btnDanger}>
-                        Delete
-                      </button>
-                    </div>
-
-                    <div style={{ display: "grid", gap: 10, marginTop: 10 }}>
-                      <div style={styles.grid2}>
+                      <div style={styles.titleRow2}>
                         <input
                           value={edit.title}
                           onChange={(e) =>
                             setEditMap((p) => ({ ...p, [d.id]: { ...edit, title: e.target.value } }))
                           }
-                          style={styles.input}
+                          style={styles.inputInlineTitle}
                           placeholder="Deal title"
-                          disabled={!canWrite}
+                          disabled={disableWrites}
                         />
+
+                        <span style={styles.valueTag}>{money(edit.value)}</span>
+                      </div>
+                    </div>
+
+                    <div style={styles.actions}>
+                      <Link href={`/dashboard/deals/${d.id}`} style={styles.btnMini}>
+                        Open
+                      </Link>
+                      <button
+                        onClick={() => deleteDeal(d.id, d.title)}
+                        style={{
+                          ...styles.btnMini,
+                          ...styles.btnMiniDanger,
+                          ...(disableWrites ? { opacity: 0.55, cursor: "not-allowed" } : {}),
+                        }}
+                        disabled={disableWrites}
+                        type="button"
+                        title={disableWrites ? "Upgrade required" : "Delete deal"}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+
+                  <div style={styles.cardBody}>
+                    <div style={styles.grid2}>
+                      <div>
+                        <div style={styles.smallLabel}>Status</div>
+                        <select
+                          value={d.status}
+                          onChange={(e) => updateDealStatus(d.id, e.target.value)}
+                          style={styles.selectInline}
+                          disabled={disableWrites}
+                        >
+                          {STATUSES.map((s) => (
+                            <option key={s.value} value={s.value}>
+                              {s.label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <div style={styles.smallLabel}>Value</div>
                         <input
                           value={edit.value}
                           onChange={(e) =>
                             setEditMap((p) => ({ ...p, [d.id]: { ...edit, value: e.target.value } }))
                           }
-                          style={styles.input}
+                          style={styles.inputInline}
                           placeholder="Value ($)"
-                          disabled={!canWrite}
+                          disabled={disableWrites}
                         />
                       </div>
+                    </div>
 
-                      <div style={styles.rowBottom}>
-                        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-                          <div style={{ fontSize: 13, opacity: 0.8, fontWeight: 900 }}>Status</div>
-                          <select
-                            value={d.status}
-                            onChange={(e) => updateDealStatus(d.id, e.target.value)}
-                            style={{
-                              ...styles.selectInline,
-                              ...( !canWrite ? { opacity: 0.6, cursor: "not-allowed" } : {}),
-                            }}
-                            disabled={!canWrite}
-                          >
-                            {STATUSES.map((s) => (
-                              <option key={s.value} value={s.value}>
-                                {s.label}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
+                    <div style={styles.cardFooter}>
+                      <span style={{ opacity: 0.7 }}>
+                        Added: {d.created_at ? new Date(d.created_at).toLocaleDateString() : "—"}
+                      </span>
 
-                        <button
-                          onClick={() => saveDealDetails(d.id)}
-                          disabled={!canWrite || savingId === d.id}
-                          style={{
-                            ...styles.btnPrimarySmall,
-                            ...( !canWrite
-                              ? {
-                                  opacity: 0.55,
-                                  cursor: "not-allowed",
-                                  border: "1px solid #2a2a2a",
-                                  background: "#141414",
-                                  color: "#bdbdbd",
-                                }
-                              : {}),
-                          }}
-                        >
-                          {!canWrite ? "Upgrade" : savingId === d.id ? "Saving..." : "Save"}
-                        </button>
-                      </div>
+                      <button
+                        onClick={() => saveDealDetails(d.id)}
+                        disabled={disableWrites || savingId === d.id}
+                        style={{
+                          ...styles.btnPrimarySmall,
+                          ...(disableWrites
+                            ? {
+                                opacity: 0.55,
+                                cursor: "not-allowed",
+                                border: "1px solid rgba(255,255,255,0.14)",
+                                background: "rgba(255,255,255,0.06)",
+                                color: "rgba(255,255,255,0.65)",
+                              }
+                            : {}),
+                        }}
+                        type="button"
+                      >
+                        {!canWrite ? "Upgrade" : savingId === d.id ? "Saving..." : "Save"}
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -558,54 +654,57 @@ export default function DealsPage() {
 }
 
 const styles = {
-  header: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 },
-  headerRight: { display: "flex", gap: 10, alignItems: "center" },
+  header: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap" },
+  headerRight: { display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" },
+  titleRow: { display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" },
 
-  h1: { margin: 0, fontSize: 28, fontWeight: 950 },
-  sub: { marginTop: 6, opacity: 0.75 },
+  h1: { margin: 0, fontSize: 28, fontWeight: 950, letterSpacing: -0.4 },
+  sub: { marginTop: 8, opacity: 0.75, maxWidth: 820 },
 
-  badge: {
+  pill: {
     display: "inline-block",
-    padding: "2px 10px",
+    padding: "6px 10px",
     borderRadius: 999,
     border: "1px solid rgba(255,255,255,0.16)",
     background: "rgba(255,255,255,0.06)",
     fontWeight: 900,
     fontSize: 12,
+    whiteSpace: "nowrap",
+  },
+  pillMuted: {
+    display: "inline-block",
+    padding: "6px 10px",
+    borderRadius: 999,
+    border: "1px solid rgba(255,255,255,0.12)",
+    background: "rgba(255,255,255,0.04)",
+    fontWeight: 900,
+    fontSize: 12,
+    opacity: 0.9,
+    whiteSpace: "nowrap",
   },
 
-  h2: { margin: 0, fontSize: 18, fontWeight: 900 },
-
-  card: {
-    marginTop: 18,
-    padding: 16,
-    border: "1px solid #242424",
-    borderRadius: 16,
-    background: "#111111",
-  },
-
-  form: { marginTop: 12, display: "grid", gap: 10 },
-  grid2: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 },
-
-  input: {
+  alert: {
+    marginTop: 14,
     padding: 12,
-    borderRadius: 12,
-    border: "1px solid #2a2a2a",
-    background: "#0f0f0f",
+    borderRadius: 14,
+    background: "rgba(239,68,68,0.10)",
+    border: "1px solid rgba(239,68,68,0.28)",
+    color: "#fecaca",
+    fontWeight: 850,
+  },
+
+  controls: { marginTop: 14, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" },
+  search: {
+    flex: "1 1 260px",
+    padding: "11px 12px",
+    borderRadius: 14,
+    border: "1px solid rgba(255,255,255,0.14)",
+    background: "rgba(255,255,255,0.05)",
     color: "white",
     outline: "none",
+    fontWeight: 850,
   },
-
-  select: {
-    padding: 12,
-    borderRadius: 12,
-    border: "1px solid #2a2a2a",
-    background: "#0f0f0f",
-    color: "white",
-    outline: "none",
-  },
-
-  selectSmall: {
+  selectPill: {
     padding: "10px 12px",
     borderRadius: 999,
     border: "1px solid rgba(255,255,255,0.16)",
@@ -614,17 +713,6 @@ const styles = {
     outline: "none",
     fontWeight: 900,
     fontSize: 13,
-    cursor: "pointer",
-  },
-
-  selectInline: {
-    padding: "8px 10px",
-    borderRadius: 10,
-    border: "1px solid #2a2a2a",
-    background: "#0f0f0f",
-    color: "white",
-    outline: "none",
-    fontWeight: 900,
     cursor: "pointer",
   },
 
@@ -639,59 +727,170 @@ const styles = {
     fontSize: 13,
   },
 
+  h2: { margin: 0, fontSize: 18, fontWeight: 900, letterSpacing: -0.2 },
+
+  card: {
+    marginTop: 18,
+    padding: 16,
+    border: "1px solid rgba(255,255,255,0.10)",
+    borderRadius: 18,
+    background: "rgba(255,255,255,0.04)",
+  },
+  cardTop: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" },
+
+  form: { marginTop: 12, display: "grid", gap: 10 },
+  grid2: { display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10 },
+
+  input: {
+    padding: 12,
+    borderRadius: 14,
+    border: "1px solid rgba(255,255,255,0.12)",
+    background: "rgba(0,0,0,0.22)",
+    color: "white",
+    outline: "none",
+  },
+  select: {
+    padding: 12,
+    borderRadius: 14,
+    border: "1px solid rgba(255,255,255,0.12)",
+    background: "rgba(0,0,0,0.22)",
+    color: "white",
+    outline: "none",
+    fontWeight: 850,
+  },
+
   btnPrimary: {
     padding: "12px 14px",
-    borderRadius: 12,
-    border: "1px solid #f5f5f5",
-    background: "#f5f5f5",
+    borderRadius: 14,
+    border: "1px solid rgba(255,255,255,0.12)",
+    background: "white",
     color: "#0b0b0b",
     fontWeight: 950,
     cursor: "pointer",
   },
-
   btnPrimarySmall: {
     padding: "10px 12px",
     borderRadius: 12,
-    border: "1px solid #f5f5f5",
-    background: "#f5f5f5",
+    border: "1px solid rgba(255,255,255,0.12)",
+    background: "white",
     color: "#0b0b0b",
     fontWeight: 950,
     cursor: "pointer",
     fontSize: 13,
   },
 
-  btnDanger: {
+  listHeader: { marginTop: 16, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 },
+
+  empty: {
+    marginTop: 12,
+    padding: 16,
+    borderRadius: 18,
+    border: "1px solid rgba(255,255,255,0.10)",
+    background: "rgba(255,255,255,0.03)",
+  },
+
+  listGrid: { marginTop: 12, display: "grid", gap: 12 },
+
+  dealCard: {
+    padding: 14,
+    borderRadius: 18,
+    border: "1px solid rgba(255,255,255,0.10)",
+    background: "rgba(255,255,255,0.03)",
+  },
+
+  cardHead: { display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start", flexWrap: "wrap" },
+
+  topMeta: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" },
+  chip: {
+    display: "inline-flex",
+    alignItems: "center",
+    padding: "6px 10px",
+    borderRadius: 999,
+    border: "1px solid rgba(255,255,255,0.12)",
+    background: "rgba(255,255,255,0.04)",
+    fontSize: 12,
+    fontWeight: 900,
+    opacity: 0.9,
+  },
+  contactLink: { color: "white", fontWeight: 950, textDecoration: "none" },
+
+  titleRow2: { marginTop: 10, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" },
+
+  inputInlineTitle: {
+    minWidth: 260,
+    flex: "1 1 260px",
     padding: "10px 12px",
+    borderRadius: 14,
+    border: "1px solid rgba(255,255,255,0.12)",
+    background: "rgba(0,0,0,0.22)",
+    color: "white",
+    outline: "none",
+    fontWeight: 950,
+    letterSpacing: -0.2,
+  },
+
+  valueTag: {
+    padding: "8px 10px",
+    borderRadius: 999,
+    border: "1px solid rgba(255,255,255,0.12)",
+    background: "rgba(255,255,255,0.04)",
+    fontWeight: 950,
+    whiteSpace: "nowrap",
+  },
+
+  actions: { display: "flex", gap: 8, alignItems: "center" },
+  btnMini: {
+    padding: "9px 12px",
     borderRadius: 12,
+    border: "1px solid rgba(255,255,255,0.14)",
+    background: "rgba(255,255,255,0.06)",
+    color: "white",
+    fontWeight: 900,
+    fontSize: 13,
+    textDecoration: "none",
+    cursor: "pointer",
+  },
+  btnMiniDanger: {
     border: "1px solid rgba(239,68,68,0.35)",
     background: "rgba(239,68,68,0.10)",
     color: "#fecaca",
-    cursor: "pointer",
-    fontWeight: 950,
-    height: "fit-content",
   },
 
-  listItem: {
-    padding: 14,
-    borderRadius: 16,
-    border: "1px solid #242424",
-    background: "#111111",
-    display: "flex",
-    gap: 10,
-  },
+  cardBody: { marginTop: 12, display: "grid", gap: 12 },
 
-  rowTop: { display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start" },
-  rowBottom: { display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" },
+  smallLabel: { fontSize: 12, opacity: 0.75, fontWeight: 900, marginBottom: 6 },
 
-  link: { color: "white", fontWeight: 950, textDecoration: "underline" },
-
-  alert: {
-    marginTop: 14,
-    padding: 12,
-    borderRadius: 12,
-    background: "#1a0f0f",
-    border: "1px solid #5a1f1f",
-    color: "#ffd6d6",
+  selectInline: {
+    width: "100%",
+    padding: "10px 12px",
+    borderRadius: 14,
+    border: "1px solid rgba(255,255,255,0.12)",
+    background: "rgba(0,0,0,0.22)",
+    color: "white",
+    outline: "none",
     fontWeight: 900,
+    cursor: "pointer",
+  },
+
+  inputInline: {
+    width: "100%",
+    padding: "10px 12px",
+    borderRadius: 14,
+    border: "1px solid rgba(255,255,255,0.12)",
+    background: "rgba(0,0,0,0.22)",
+    color: "white",
+    outline: "none",
+    fontWeight: 900,
+  },
+
+  cardFooter: {
+    display: "flex",
+    justifyContent: "space-between",
+    gap: 10,
+    flexWrap: "wrap",
+    alignItems: "center",
+    paddingTop: 10,
+    borderTop: "1px solid rgba(255,255,255,0.08)",
+    fontSize: 12,
   },
 };
