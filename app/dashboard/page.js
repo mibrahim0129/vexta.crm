@@ -1,3 +1,4 @@
+// app/dashboard/page.js
 "use client";
 
 import Link from "next/link";
@@ -56,7 +57,6 @@ export default function DashboardPage() {
 
       const hasAnything = (c1.count || 0) > 0 || (c2.count || 0) > 0 || (c3.count || 0) > 0;
       if (hasAnything) {
-        // Mark as seeded so we don’t keep checking every refresh.
         if (typeof window !== "undefined") localStorage.setItem(seedKey, "1");
         return;
       }
@@ -69,7 +69,6 @@ export default function DashboardPage() {
             user_id: userId,
             first_name: "Ava",
             last_name: "Martinez",
-            // If your schema has other nullable fields, leaving them out is fine.
           },
         ])
         .select("id, first_name, last_name")
@@ -121,7 +120,6 @@ export default function DashboardPage() {
         },
       ]);
 
-      // If tasks table doesn’t exist in a tester environment, don’t hard-fail the whole seed.
       if (taskErr) console.warn("Demo seed: tasks insert failed:", taskErr?.message);
 
       // 5) Create calendar event linked to contact + deal
@@ -144,13 +142,11 @@ export default function DashboardPage() {
 
       if (calErr) console.warn("Demo seed: calendar_events insert failed:", calErr?.message);
 
-      // Mark as seeded locally
       if (typeof window !== "undefined") localStorage.setItem(seedKey, "1");
 
       setOk("Demo data added (beta). You can now explore Contacts, Deals, Notes, Tasks, and Calendar.");
     } catch (e) {
       console.error(e);
-      // Don’t block dashboard if seeding fails
       setErr((prev) => prev || e?.message || "Demo seed failed");
     } finally {
       setSeeding(false);
@@ -246,35 +242,69 @@ export default function DashboardPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const isEmpty = (counts.contacts || 0) === 0 && (counts.deals || 0) === 0 && (counts.notes || 0) === 0;
+
   return (
     <div>
       <div style={styles.header}>
-        <div>
+        <div style={{ minWidth: 0 }}>
           <h1 style={styles.h1}>Dashboard</h1>
           <p style={styles.sub}>
             Welcome back • Realtime: <span style={styles.badge}>{rtStatus}</span>
-            {isBeta ? (
-              <span style={{ marginLeft: 8, ...styles.badgeMuted }}>Beta</span>
-            ) : null}
-            {seeding ? (
-              <span style={{ marginLeft: 8, ...styles.badgeMuted }}>Seeding demo data…</span>
-            ) : null}
+            {isBeta ? <span style={{ marginLeft: 8, ...styles.badgeMuted }}>Beta</span> : null}
+            {seeding ? <span style={{ marginLeft: 8, ...styles.badgeMuted }}>Seeding demo data…</span> : null}
           </p>
         </div>
 
-        <button onClick={loadDashboard} disabled={loading} style={styles.btnGhost}>
-          {loading ? "Refreshing..." : "Refresh"}
-        </button>
+        <div style={styles.headerRight}>
+          <button onClick={loadDashboard} disabled={loading} style={styles.btnGhost} type="button">
+            {loading ? "Refreshing..." : "Refresh"}
+          </button>
+        </div>
       </div>
 
       {err ? <div style={styles.alert}>{err}</div> : null}
       {ok ? <div style={styles.ok}>{ok}</div> : null}
+
+      {/* Quick actions */}
+      <div style={styles.actionsRow}>
+        <Link href="/dashboard/contacts" style={styles.actionBtn}>
+          + New Contact
+        </Link>
+        <Link href="/dashboard/deals" style={styles.actionBtn}>
+          + New Deal
+        </Link>
+        <Link href="/dashboard/notes" style={styles.actionBtn}>
+          + Add Note
+        </Link>
+        <div style={{ ...styles.actionHint }}>
+          Tip: Start with a contact → attach deals, notes, tasks, and calendar events.
+        </div>
+      </div>
 
       <div style={styles.stats}>
         <Stat title="Contacts" value={counts.contacts} href="/dashboard/contacts" />
         <Stat title="Deals" value={counts.deals} href="/dashboard/deals" />
         <Stat title="Notes" value={counts.notes} href="/dashboard/notes" />
       </div>
+
+      {isEmpty && !loading ? (
+        <div style={styles.emptyCard}>
+          <div style={{ fontWeight: 950, fontSize: 16 }}>Your CRM is empty.</div>
+          <div style={{ marginTop: 6, opacity: 0.75, lineHeight: 1.45 }}>
+            Create a contact first, then add a deal and a note. Tasks + Calendar are there when you’re ready.
+          </div>
+
+          <div style={styles.emptyBtns}>
+            <Link href="/dashboard/contacts" style={styles.btnPrimary}>
+              Create your first contact
+            </Link>
+            <button onClick={loadDashboard} style={styles.btnGhost} type="button">
+              Refresh
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       <div style={styles.grid}>
         <div style={styles.card}>
@@ -297,13 +327,19 @@ export default function DashboardPage() {
 
                 return (
                   <div key={d.id} style={styles.item}>
-                    <div style={{ fontWeight: 950 }}>{d.title}</div>
+                    <div style={styles.itemTopRow}>
+                      <div style={{ fontWeight: 950, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>
+                        {d.title}
+                      </div>
+                      <span style={styles.pill}>{String(d.status || "—")}</span>
+                    </div>
+
                     <div style={styles.meta}>
                       Contact:{" "}
                       <Link href={`/dashboard/contacts/${d.contact_id}`} style={styles.link}>
                         {contactName}
                       </Link>{" "}
-                      • Status: <b>{d.status}</b> • Value: ${Number(d.value || 0).toLocaleString()}
+                      • Value: <b>${Number(d.value || 0).toLocaleString()}</b>
                     </div>
                   </div>
                 );
@@ -329,25 +365,33 @@ export default function DashboardPage() {
               {recentNotes.map((n) => {
                 const c = n.contacts;
                 const contactName = c ? `${c.first_name || ""} ${c.last_name || ""}`.trim() || "Unnamed" : "Unknown";
-                const preview = String(n.body || "").slice(0, 140);
+
+                const preview = String(n.body || "").slice(0, 160);
 
                 return (
                   <div key={n.id} style={styles.item}>
-                    <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.5 }}>
+                    <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.5, opacity: 0.95 }}>
                       {preview}
-                      {String(n.body || "").length > 140 ? "…" : ""}
+                      {String(n.body || "").length > 160 ? "…" : ""}
                     </div>
-                    <div style={styles.meta}>
-                      Contact:{" "}
-                      <Link href={`/dashboard/contacts/${n.contact_id}`} style={styles.link}>
-                        {contactName}
-                      </Link>
-                      {n.deals?.title ? (
-                        <>
-                          {" "}
-                          • Deal: <b>{n.deals.title}</b>
-                        </>
-                      ) : null}
+
+                    <div style={styles.metaRow}>
+                      <div style={styles.meta}>
+                        Contact:{" "}
+                        <Link href={`/dashboard/contacts/${n.contact_id}`} style={styles.link}>
+                          {contactName}
+                        </Link>
+                        {n.deals?.title ? (
+                          <>
+                            {" "}
+                            • Deal: <b>{n.deals.title}</b>
+                          </>
+                        ) : null}
+                      </div>
+
+                      <div style={styles.metaRight}>
+                        {n.created_at ? new Date(n.created_at).toLocaleDateString() : ""}
+                      </div>
                     </div>
                   </div>
                 );
@@ -356,6 +400,17 @@ export default function DashboardPage() {
           )}
         </div>
       </div>
+
+      <style jsx>{`
+        @media (max-width: 980px) {
+          .grid2 {
+            grid-template-columns: 1fr !important;
+          }
+          .stats3 {
+            grid-template-columns: 1fr !important;
+          }
+        }
+      `}</style>
     </div>
   );
 }
@@ -371,7 +426,9 @@ function Stat({ title, value, href }) {
 }
 
 const styles = {
-  header: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 },
+  header: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" },
+  headerRight: { display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" },
+
   h1: { margin: 0, fontSize: 28, fontWeight: 950 },
   sub: { marginTop: 6, opacity: 0.75 },
 
@@ -396,7 +453,41 @@ const styles = {
     opacity: 0.9,
   },
 
-  stats: { marginTop: 16, display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 },
+  actionsRow: {
+    marginTop: 14,
+    display: "flex",
+    gap: 10,
+    flexWrap: "wrap",
+    alignItems: "center",
+  },
+
+  actionBtn: {
+    padding: "10px 12px",
+    borderRadius: 999,
+    border: "1px solid rgba(255,255,255,0.16)",
+    background: "rgba(255,255,255,0.06)",
+    color: "white",
+    fontWeight: 900,
+    fontSize: 13,
+    textDecoration: "none",
+  },
+
+  actionHint: {
+    padding: "8px 10px",
+    borderRadius: 999,
+    border: "1px solid rgba(255,255,255,0.10)",
+    background: "rgba(255,255,255,0.03)",
+    fontWeight: 850,
+    fontSize: 12,
+    opacity: 0.75,
+  },
+
+  stats: {
+    marginTop: 14,
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr 1fr",
+    gap: 12,
+  },
 
   stat: {
     textDecoration: "none",
@@ -407,12 +498,18 @@ const styles = {
     background: "#111111",
     display: "grid",
     gap: 8,
+    transition: "transform 0.05s ease",
   },
 
-  grid: { marginTop: 12, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 },
+  grid: {
+    marginTop: 12,
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
+    gap: 12,
+  },
 
   card: { padding: 16, border: "1px solid #242424", borderRadius: 16, background: "#111111" },
-  cardTop: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 },
+  cardTop: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" },
   h2: { margin: 0, fontSize: 18, fontWeight: 900 },
 
   item: {
@@ -421,10 +518,27 @@ const styles = {
     border: "1px solid #242424",
     background: "#101010",
     display: "grid",
-    gap: 6,
+    gap: 10,
+  },
+
+  itemTopRow: { display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" },
+
+  pill: {
+    display: "inline-block",
+    padding: "6px 10px",
+    borderRadius: 999,
+    border: "1px solid rgba(255,255,255,0.16)",
+    background: "rgba(255,255,255,0.06)",
+    fontWeight: 900,
+    fontSize: 12,
+    whiteSpace: "nowrap",
+    opacity: 0.95,
   },
 
   meta: { opacity: 0.75, fontSize: 13, lineHeight: 1.4 },
+
+  metaRow: { display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", flexWrap: "wrap" },
+  metaRight: { opacity: 0.6, fontSize: 12, fontWeight: 900 },
 
   link: { color: "white", fontWeight: 950, textDecoration: "underline" },
   linkSmall: { color: "white", fontWeight: 900, textDecoration: "underline", fontSize: 13 },
@@ -438,7 +552,32 @@ const styles = {
     cursor: "pointer",
     fontWeight: 900,
     fontSize: 13,
+    textDecoration: "none",
   },
+
+  btnPrimary: {
+    padding: "10px 14px",
+    borderRadius: 12,
+    border: "1px solid #f5f5f5",
+    background: "#f5f5f5",
+    color: "#0b0b0b",
+    fontWeight: 950,
+    cursor: "pointer",
+    textDecoration: "none",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  emptyCard: {
+    marginTop: 14,
+    padding: 16,
+    borderRadius: 16,
+    border: "1px solid rgba(255,255,255,0.10)",
+    background: "rgba(255,255,255,0.03)",
+  },
+
+  emptyBtns: { marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" },
 
   alert: {
     marginTop: 14,
