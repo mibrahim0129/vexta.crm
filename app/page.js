@@ -21,6 +21,26 @@ function CheckIcon() {
   );
 }
 
+function LogoMark() {
+  return (
+    <span className="logoWrap" aria-hidden="true">
+      <img
+        className="logoImg"
+        src="/VLT.png"
+        alt="Vexta logo"
+        onError={(e) => {
+          e.currentTarget.style.display = "none";
+          const fallback = e.currentTarget.nextSibling;
+          if (fallback) fallback.style.display = "grid";
+        }}
+      />
+      <span className="logoFallback" style={{ display: "none" }}>
+        V
+      </span>
+    </span>
+  );
+}
+
 export default function HomePage() {
   return (
     <main className="page">
@@ -29,7 +49,7 @@ export default function HomePage() {
       <header className="header">
         <div className="wrap headerInner">
           <Link href="/" className="brand">
-            <span className="logo" />
+            <LogoMark />
             <span className="brandName">Vexta</span>
           </Link>
 
@@ -147,9 +167,7 @@ export default function HomePage() {
       <section id="features" className="section sectionAlt">
         <div className="wrap">
           <h2 className="h2">Features that match your workflow</h2>
-          <p className="p2">
-            Built around speed, linking records, and keeping the next action obvious.
-          </p>
+          <p className="p2">Built around speed, linking records, and keeping the next action obvious.</p>
 
           <div className="grid3">
             {[
@@ -263,9 +281,7 @@ export default function HomePage() {
             </div>
           </div>
 
-          <p className="finePrint">
-            Pricing can be placeholders while you finish the product.
-          </p>
+          <p className="finePrint">Pricing can be placeholders while you finish the product.</p>
         </div>
       </section>
 
@@ -273,8 +289,8 @@ export default function HomePage() {
         <div className="wrap">
           <h2 className="h2">About Vexta</h2>
           <p className="p2">
-            Vexta CRM is built to be practical: help agents follow up faster, keep deals
-            clean, and reduce chaos. The goal is simple — more action, more results, less clutter.
+            Vexta CRM is built to be practical: help agents follow up faster, keep deals clean, and reduce chaos. The goal
+            is simple — more action, more results, less clutter.
           </p>
 
           <div className="cta">
@@ -342,17 +358,42 @@ export default function HomePage() {
           text-decoration: none;
           color: #fff;
         }
-        .logo {
+
+        /* ✅ Logo */
+        .logoWrap {
           width: 36px;
           height: 36px;
           border-radius: 12px;
-          background: #fff;
+          border: 1px solid rgba(255, 255, 255, 0.12);
+          background: rgba(255, 255, 255, 0.06);
+          display: grid;
+          place-items: center;
+          overflow: hidden;
+          flex: 0 0 auto;
         }
+        .logoImg {
+          width: 100%;
+          height: 100%;
+          object-fit: contain;
+          padding: 6px;
+          display: block;
+        }
+        .logoFallback {
+          width: 100%;
+          height: 100%;
+          display: grid;
+          place-items: center;
+          font-weight: 900;
+          letter-spacing: -0.4px;
+          opacity: 0.9;
+        }
+
         .brandName {
           font-size: 18px;
           font-weight: 800;
           letter-spacing: -0.4px;
         }
+
         .nav {
           display: none;
           gap: 18px;
