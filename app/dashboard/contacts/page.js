@@ -8,6 +8,21 @@ import { supabaseBrowser } from "@/lib/supabase/browser";
 import { useSubscription } from "@/lib/subscription/useSubscription";
 import UpgradeBanner from "@/components/UpgradeBanner";
 
+function normalize(s) {
+  return String(s || "").toLowerCase().trim();
+}
+
+function contactName(c) {
+  return `${c.first_name || ""} ${c.last_name || ""}`.trim() || "Unnamed";
+}
+
+function initialsFromContact(c) {
+  const a = (c?.first_name || " ")[0] || "";
+  const b = (c?.last_name || " ")[0] || "";
+  const inits = `${a}${b}`.trim().toUpperCase();
+  return inits || "C";
+}
+
 export default function ContactsPage() {
   const sb = useMemo(() => supabaseBrowser(), []);
 
@@ -20,6 +35,9 @@ export default function ContactsPage() {
   const [err, setErr] = useState("");
   const [contacts, setContacts] = useState([]);
 
+  // Responsive UI
+  const [isMobile, setIsMobile] = useState(false);
+
   // UI filters
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState("new"); // new | old | name
@@ -30,6 +48,13 @@ export default function ContactsPage() {
     email: "",
     phone: "",
   });
+
+  useEffect(() => {
+    const onResize = () => setIsMobile(window.innerWidth < 860);
+    onResize();
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
 
   async function requireSession() {
     const { data } = await sb.auth.getSession();
@@ -163,15 +188,11 @@ export default function ContactsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  function normalize(s) {
-    return String(s || "").toLowerCase().trim();
-  }
+  const q = normalize(query);
 
   const filtered = contacts.filter((c) => {
-    const q = normalize(query);
     if (!q) return true;
-
-    const name = `${c.first_name || ""} ${c.last_name || ""}`.trim();
+    const name = contactName(c);
     const hay = `${name} ${c.email || ""} ${c.phone || ""}`.toLowerCase();
     return hay.includes(q);
   });
@@ -189,20 +210,19 @@ export default function ContactsPage() {
 
   const disableWrites = subLoading || !canCreate;
 
+  const grid2 = isMobile ? styles.grid1 : styles.grid2;
+  const listGrid = isMobile ? styles.listGrid1 : styles.listGrid2;
+
   return (
     <div>
+      {/* Header */}
       <div style={styles.header}>
         <div style={{ minWidth: 0 }}>
           <div style={styles.titleRow}>
             <h1 style={styles.h1}>Contacts</h1>
 
-            <span style={styles.pill}>
-              {subLoading ? "Checking plan…" : `Plan: ${plan || "Free"}`}
-            </span>
-
-            <span style={styles.pillMuted}>
-              {loading ? "Loading…" : `${sorted.length} shown`}
-            </span>
+            <span style={styles.pill}>{subLoading ? "Checking plan…" : `Plan: ${plan || "Free"}`}</span>
+            <span style={styles.pillMuted}>{loading ? "Loading…" : `${sorted.length} shown`}</span>
           </div>
 
           <p style={styles.sub}>
@@ -220,7 +240,7 @@ export default function ContactsPage() {
         </div>
       </div>
 
-      {/* ✅ Upgrade banner only when access is disabled */}
+      {/* Upgrade banner */}
       {!subLoading && !access ? (
         <div style={{ marginTop: 14 }}>
           <UpgradeBanner
@@ -239,12 +259,19 @@ export default function ContactsPage() {
 
       {/* Controls */}
       <div style={styles.controls}>
-        <input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search name, email, phone…"
-          style={styles.search}
-        />
+        <div style={styles.searchWrap}>
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search name, email, phone…"
+            style={styles.search}
+          />
+          {query.trim() ? (
+            <button onClick={() => setQuery("")} style={styles.clearBtn} type="button" title="Clear">
+              ✕
+            </button>
+          ) : null}
+        </div>
 
         <select value={sort} onChange={(e) => setSort(e.target.value)} style={styles.selectSmall}>
           <option value="new">Newest</option>
@@ -263,7 +290,7 @@ export default function ContactsPage() {
         </div>
 
         <form onSubmit={addContact} style={styles.form}>
-          <div style={styles.grid2}>
+          <div style={grid2}>
             <input
               value={form.first_name}
               onChange={(e) => setForm((p) => ({ ...p, first_name: e.target.value }))}
@@ -280,7 +307,7 @@ export default function ContactsPage() {
             />
           </div>
 
-          <div style={styles.grid2}>
+          <div style={grid2}>
             <input
               value={form.email}
               onChange={(e) => setForm((p) => ({ ...p, email: e.target.value }))}
@@ -297,29 +324,33 @@ export default function ContactsPage() {
             />
           </div>
 
-          <button
-            type="submit"
-            disabled={disableWrites || saving}
-            style={{
-              ...styles.btnPrimary,
-              ...(disableWrites
-                ? {
-                    opacity: 0.55,
-                    cursor: "not-allowed",
-                    border: "1px solid rgba(255,255,255,0.14)",
-                    background: "rgba(255,255,255,0.06)",
-                    color: "rgba(255,255,255,0.65)",
-                  }
-                : {}),
-            }}
-          >
-            {subLoading ? "Checking plan…" : saving ? "Saving..." : "Add Contact"}
-          </button>
+          <div style={styles.formBottom}>
+            <button
+              type="submit"
+              disabled={disableWrites || saving}
+              style={{
+                ...styles.btnPrimary,
+                ...(disableWrites
+                  ? {
+                      opacity: 0.55,
+                      cursor: "not-allowed",
+                      border: "1px solid rgba(255,255,255,0.14)",
+                      background: "rgba(255,255,255,0.06)",
+                      color: "rgba(255,255,255,0.65)",
+                    }
+                  : {}),
+              }}
+            >
+              {subLoading ? "Checking plan…" : saving ? "Saving..." : "Add Contact"}
+            </button>
+
+            <div style={{ fontSize: 12, opacity: 0.7 }}>
+              Tip: Keep phone/email updated — it makes follow-ups faster.
+            </div>
+          </div>
 
           {!subLoading && !access ? (
-            <div style={{ opacity: 0.7, fontSize: 13 }}>
-              Adding/deleting contacts is disabled until you upgrade.
-            </div>
+            <div style={{ opacity: 0.7, fontSize: 13 }}>Adding/deleting contacts is disabled until you upgrade.</div>
           ) : null}
         </form>
       </div>
@@ -343,13 +374,17 @@ export default function ContactsPage() {
             </div>
           </div>
         ) : sorted.length === 0 ? (
-          <div style={{ opacity: 0.75 }}>No contacts match your search.</div>
+          <div style={styles.empty}>
+            <div style={{ fontWeight: 950, fontSize: 14 }}>No matches</div>
+            <div style={{ opacity: 0.75, marginTop: 6 }}>
+              Try a different search, or clear the filter.
+            </div>
+          </div>
         ) : (
-          <div style={styles.listGrid}>
+          <div style={listGrid}>
             {sorted.map((c) => {
-              const name = `${c.first_name || ""} ${c.last_name || ""}`.trim() || "Unnamed";
-              const initials =
-                `${(c.first_name || " ")[0] || ""}${(c.last_name || " ")[0] || ""}`.trim().toUpperCase() || "C";
+              const name = contactName(c);
+              const initials = initialsFromContact(c);
 
               return (
                 <div key={c.id} style={styles.contactCard}>
@@ -364,16 +399,8 @@ export default function ContactsPage() {
                       </Link>
 
                       <div style={styles.metaLine}>
-                        {c.email ? (
-                          <span style={styles.metaChip}>
-                            ✉ {c.email}
-                          </span>
-                        ) : null}
-                        {c.phone ? (
-                          <span style={styles.metaChip}>
-                            ☎ {c.phone}
-                          </span>
-                        ) : null}
+                        {c.email ? <span style={styles.metaChip}>✉ {c.email}</span> : null}
+                        {c.phone ? <span style={styles.metaChip}>☎ {c.phone}</span> : null}
                       </div>
                     </div>
 
@@ -401,7 +428,7 @@ export default function ContactsPage() {
                     <span style={{ opacity: 0.7 }}>
                       Added: {c.created_at ? new Date(c.created_at).toLocaleDateString() : "—"}
                     </span>
-                    <span style={styles.footerHint}>Click “Open” to manage everything.</span>
+                    <span style={styles.footerHint}>Open to manage everything.</span>
                   </div>
                 </div>
               );
@@ -475,16 +502,17 @@ const styles = {
     fontWeight: 850,
   },
 
-  controls: {
-    marginTop: 14,
+  controls: { marginTop: 14, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" },
+
+  searchWrap: {
+    flex: "1 1 280px",
+    position: "relative",
     display: "flex",
-    gap: 10,
-    flexWrap: "wrap",
     alignItems: "center",
   },
   search: {
-    flex: "1 1 280px",
-    padding: "11px 12px",
+    width: "100%",
+    padding: "11px 40px 11px 12px",
     borderRadius: 14,
     border: "1px solid rgba(255,255,255,0.14)",
     background: "rgba(255,255,255,0.05)",
@@ -492,6 +520,22 @@ const styles = {
     outline: "none",
     fontWeight: 850,
   },
+  clearBtn: {
+    position: "absolute",
+    right: 8,
+    top: "50%",
+    transform: "translateY(-50%)",
+    width: 30,
+    height: 30,
+    borderRadius: 10,
+    border: "1px solid rgba(255,255,255,0.14)",
+    background: "rgba(255,255,255,0.06)",
+    color: "white",
+    cursor: "pointer",
+    fontWeight: 950,
+    lineHeight: 1,
+  },
+
   selectSmall: {
     padding: "10px 12px",
     borderRadius: 999,
@@ -517,6 +561,7 @@ const styles = {
 
   form: { marginTop: 12, display: "grid", gap: 10 },
   grid2: { display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10 },
+  grid1: { display: "grid", gridTemplateColumns: "1fr", gap: 10 },
 
   input: {
     padding: 12,
@@ -526,6 +571,8 @@ const styles = {
     color: "white",
     outline: "none",
   },
+
+  formBottom: { display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", alignItems: "center" },
 
   btnPrimary: {
     padding: "12px 14px",
@@ -548,12 +595,8 @@ const styles = {
     background: "rgba(255,255,255,0.03)",
   },
 
-  listGrid: {
-    marginTop: 12,
-    display: "grid",
-    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-    gap: 12,
-  },
+  listGrid2: { marginTop: 12, display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 12 },
+  listGrid1: { marginTop: 12, display: "grid", gridTemplateColumns: "1fr", gap: 12 },
 
   contactCard: {
     padding: 14,
@@ -564,12 +607,7 @@ const styles = {
     gap: 10,
   },
 
-  cardRow: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 12,
-  },
+  cardRow: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 },
 
   avatar: {
     width: 38,
@@ -607,6 +645,7 @@ const styles = {
   },
 
   actions: { display: "flex", gap: 8, alignItems: "center", flexShrink: 0 },
+
   btnMini: {
     padding: "9px 12px",
     borderRadius: 12,
@@ -634,12 +673,4 @@ const styles = {
     borderTop: "1px solid rgba(255,255,255,0.08)",
   },
   footerHint: { opacity: 0.65, fontWeight: 800 },
-
-  // Mobile: make grids stack
-  "@media (max-width: 860px)": {},
 };
-
-// NOTE: Inline styles don’t support media queries directly.
-// If you want true responsive grid switching purely via inline styles,
-// we can switch listGrid/grid2 based on window width like we did in layout.
-// For now, this still looks good because the container shrinks and wraps.
