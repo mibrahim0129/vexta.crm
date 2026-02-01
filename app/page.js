@@ -21,24 +21,10 @@ function CheckIcon() {
   );
 }
 
+// ✅ Server-safe logo (no onError / no handlers)
+// Put your file at: /public/VLT.png
 function LogoMark() {
-  return (
-    <span className="logoWrap" aria-hidden="true">
-      <img
-        className="logoImg"
-        src="/VLT.png"
-        alt="Vexta logo"
-        onError={(e) => {
-          e.currentTarget.style.display = "none";
-          const fallback = e.currentTarget.nextSibling;
-          if (fallback) fallback.style.display = "grid";
-        }}
-      />
-      <span className="logoFallback" style={{ display: "none" }}>
-        V
-      </span>
-    </span>
-  );
+  return <span className="logoMark" aria-hidden="true" />;
 }
 
 export default function HomePage() {
@@ -81,8 +67,8 @@ export default function HomePage() {
           </h1>
 
           <p className="p">
-            Vexta CRM keeps contacts, deals, tasks, notes, and calendar events connected —
-            so you always know the next follow-up and what matters today.
+            Vexta CRM keeps contacts, deals, tasks, notes, and calendar events connected — so you always know the next
+            follow-up and what matters today.
           </p>
 
           <div className="cta">
@@ -289,8 +275,8 @@ export default function HomePage() {
         <div className="wrap">
           <h2 className="h2">About Vexta</h2>
           <p className="p2">
-            Vexta CRM is built to be practical: help agents follow up faster, keep deals clean, and reduce chaos. The goal
-            is simple — more action, more results, less clutter.
+            Vexta CRM is built to be practical: help agents follow up faster, keep deals clean, and reduce chaos. The
+            goal is simple — more action, more results, less clutter.
           </p>
 
           <div className="cta">
@@ -359,33 +345,17 @@ export default function HomePage() {
           color: #fff;
         }
 
-        /* ✅ Logo */
-        .logoWrap {
+        /* ✅ Your logo (no background / uses transparent PNG) */
+        .logoMark {
           width: 36px;
           height: 36px;
           border-radius: 12px;
-          border: 1px solid rgba(255, 255, 255, 0.12);
-          background: rgba(255, 255, 255, 0.06);
-          display: grid;
-          place-items: center;
-          overflow: hidden;
-          flex: 0 0 auto;
-        }
-        .logoImg {
-          width: 100%;
-          height: 100%;
-          object-fit: contain;
-          padding: 6px;
-          display: block;
-        }
-        .logoFallback {
-          width: 100%;
-          height: 100%;
-          display: grid;
-          place-items: center;
-          font-weight: 900;
-          letter-spacing: -0.4px;
-          opacity: 0.9;
+          border: 1px solid rgba(255, 255, 255, 0.14);
+          background-color: rgba(255, 255, 255, 0.06);
+          background-image: url("/VLT.png");
+          background-repeat: no-repeat;
+          background-position: center;
+          background-size: contain;
         }
 
         .brandName {
@@ -393,7 +363,6 @@ export default function HomePage() {
           font-weight: 800;
           letter-spacing: -0.4px;
         }
-
         .nav {
           display: none;
           gap: 18px;
