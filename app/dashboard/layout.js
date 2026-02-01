@@ -34,6 +34,29 @@ export default function DashboardLayout({ children }) {
     setMobileOpen(false);
   }, [pathname]);
 
+  // Prevent body scroll when drawer is open
+  useEffect(() => {
+    if (!isMobile) return;
+    if (!mobileOpen) {
+      document.body.style.overflow = "";
+      return;
+    }
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = "";
+    };
+  }, [isMobile, mobileOpen]);
+
+  // ESC closes drawer
+  useEffect(() => {
+    if (!mobileOpen) return;
+    const onKey = (e) => {
+      if (e.key === "Escape") setMobileOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [mobileOpen]);
+
   useEffect(() => {
     let alive = true;
     let unsubscribeAuth = null;
@@ -63,7 +86,6 @@ export default function DashboardLayout({ children }) {
           return;
         }
 
-        // Logged out -> go login
         const next = pathname ? pathname : "/dashboard";
         router.replace(`/login?next=${encodeURIComponent(next)}`);
       });
@@ -135,8 +157,8 @@ export default function DashboardLayout({ children }) {
   if (!authReady) {
     return (
       <div style={styles.gate}>
-        <div style={{ textAlign: "center", maxWidth: 520 }}>
-          <div style={{ fontWeight: 950, opacity: 0.9, fontSize: 16 }}>Loading…</div>
+        <div style={styles.gateCard}>
+          <div style={{ fontWeight: 950, fontSize: 16, letterSpacing: -0.2 }}>Loading…</div>
 
           {gateError ? (
             <>
@@ -145,7 +167,11 @@ export default function DashboardLayout({ children }) {
                 Refresh
               </button>
             </>
-          ) : null}
+          ) : (
+            <div style={{ marginTop: 10, opacity: 0.7, fontWeight: 800, fontSize: 13 }}>
+              Signing you in and preparing your workspace.
+            </div>
+          )}
         </div>
       </div>
     );
@@ -162,7 +188,7 @@ export default function DashboardLayout({ children }) {
           ...(isDrawer
             ? styles.drawer
             : {
-                width: collapsed ? 84 : 260,
+                width: collapsed ? 84 : 272,
                 transition: "width 180ms ease",
                 position: "sticky",
                 top: 0,
@@ -171,7 +197,9 @@ export default function DashboardLayout({ children }) {
         }}
       >
         <div style={styles.brand}>
-          <div style={styles.logo}>V</div>
+          <div style={styles.logo} aria-hidden="true">
+            V
+          </div>
 
           {!collapsed || isDrawer ? (
             <div style={{ minWidth: 0 }}>
@@ -181,12 +209,7 @@ export default function DashboardLayout({ children }) {
           ) : null}
 
           {isDrawer ? (
-            <button
-              onClick={() => setMobileOpen(false)}
-              style={styles.drawerClose}
-              title="Close"
-              type="button"
-            >
+            <button onClick={() => setMobileOpen(false)} style={styles.drawerClose} title="Close" type="button">
               ✕
             </button>
           ) : (
@@ -214,8 +237,7 @@ export default function DashboardLayout({ children }) {
 
         <nav style={styles.nav}>
           {(q.trim() ? filteredNav : nav).map((item) => {
-            const active =
-              item.href === "/dashboard" ? pathname === "/dashboard" : pathname?.startsWith(item.href);
+            const active = item.href === "/dashboard" ? pathname === "/dashboard" : pathname?.startsWith(item.href);
 
             return (
               <Link
@@ -228,7 +250,18 @@ export default function DashboardLayout({ children }) {
                 }}
                 title={collapsed && !isDrawer ? item.label : undefined}
               >
-                {collapsed && !isDrawer ? item.label[0] : item.label}
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+                  {collapsed && !isDrawer ? (
+                    <span style={styles.navDot} aria-hidden="true" />
+                  ) : (
+                    <span style={styles.navDot} aria-hidden="true" />
+                  )}
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {collapsed && !isDrawer ? item.label : item.label}
+                  </span>
+                </span>
+
+                {!collapsed || isDrawer ? <span style={styles.navArrow}>›</span> : null}
               </Link>
             );
           })}
@@ -257,6 +290,8 @@ export default function DashboardLayout({ children }) {
 
   return (
     <div style={styles.shell}>
+      <div style={styles.bg} aria-hidden="true" />
+
       {/* Desktop sidebar */}
       {!isMobile ? <Sidebar mode="desktop" /> : null}
 
@@ -271,11 +306,14 @@ export default function DashboardLayout({ children }) {
             }}
             onClick={() => setMobileOpen(false)}
           />
+
           <div
             style={{
               ...styles.drawerWrap,
               transform: mobileOpen ? "translateX(0)" : "translateX(-110%)",
             }}
+            role="dialog"
+            aria-modal="true"
           >
             <Sidebar mode="drawer" />
           </div>
@@ -295,8 +333,8 @@ export default function DashboardLayout({ children }) {
             </button>
 
             <div style={styles.breadcrumb}>
-              <span style={{ opacity: 0.7 }}>Dashboard</span>
-              <span style={{ opacity: 0.35 }}> / </span>
+              <span style={{ opacity: 0.68 }}>Dashboard</span>
+              <span style={{ opacity: 0.28, margin: "0 8px" }}>›</span>
               <span style={{ fontWeight: 950 }}>{breadcrumb}</span>
             </div>
           </div>
@@ -322,20 +360,40 @@ export default function DashboardLayout({ children }) {
 const styles = {
   shell: {
     minHeight: "100vh",
-    background: "#0b0b0b",
+    background: "#070707",
     color: "white",
     display: "grid",
     gridTemplateColumns: "auto 1fr",
+    position: "relative",
+  },
+
+  // Subtle background polish
+  bg: {
+    position: "fixed",
+    inset: 0,
+    zIndex: -1,
+    background:
+      "radial-gradient(900px circle at 14% 10%, rgba(255,255,255,0.08), transparent 55%), radial-gradient(900px circle at 85% 28%, rgba(255,255,255,0.06), transparent 55%), linear-gradient(to bottom, #070707, #050505)",
   },
 
   // Gate screen
   gate: {
     minHeight: "100vh",
-    background: "#0b0b0b",
+    background: "#070707",
     color: "white",
     display: "grid",
     placeItems: "center",
     padding: 24,
+  },
+  gateCard: {
+    width: "100%",
+    maxWidth: 520,
+    borderRadius: 18,
+    border: "1px solid rgba(255,255,255,0.10)",
+    background: "rgba(255,255,255,0.05)",
+    boxShadow: "0 30px 120px rgba(0,0,0,0.55)",
+    padding: 18,
+    textAlign: "center",
   },
   gateBtn: {
     marginTop: 14,
@@ -350,8 +408,9 @@ const styles = {
 
   // Sidebar
   sidebar: {
-    borderRight: "1px solid #1f1f1f",
-    background: "#0f0f0f",
+    borderRight: "1px solid rgba(255,255,255,0.08)",
+    background: "rgba(16,16,16,0.72)",
+    backdropFilter: "blur(10px)",
     padding: 14,
     display: "flex",
     flexDirection: "column",
@@ -363,28 +422,29 @@ const styles = {
     alignItems: "center",
     gap: 10,
     padding: 10,
-    borderRadius: 14,
-    border: "1px solid #1f1f1f",
-    background: "#111",
+    borderRadius: 16,
+    border: "1px solid rgba(255,255,255,0.10)",
+    background: "rgba(255,255,255,0.04)",
     position: "relative",
   },
   logo: {
     width: 40,
     height: 40,
-    borderRadius: 12,
+    borderRadius: 14,
     display: "grid",
     placeItems: "center",
     fontWeight: 950,
     background: "rgba(255,255,255,0.10)",
     border: "1px solid rgba(255,255,255,0.14)",
     flexShrink: 0,
+    letterSpacing: -0.4,
   },
-  brandName: { fontWeight: 950, fontSize: 16, lineHeight: 1.1 },
-  brandSub: { fontSize: 12, opacity: 0.7, marginTop: 2 },
+  brandName: { fontWeight: 950, fontSize: 16, lineHeight: 1.1, letterSpacing: -0.2 },
+  brandSub: { fontSize: 12, opacity: 0.72, marginTop: 2 },
 
   collapseBtn: {
     marginLeft: "auto",
-    borderRadius: 10,
+    borderRadius: 12,
     border: "1px solid rgba(255,255,255,0.14)",
     background: "rgba(255,255,255,0.06)",
     color: "white",
@@ -395,7 +455,7 @@ const styles = {
 
   drawerClose: {
     marginLeft: "auto",
-    borderRadius: 10,
+    borderRadius: 12,
     border: "1px solid rgba(255,255,255,0.14)",
     background: "rgba(255,255,255,0.06)",
     color: "white",
@@ -405,17 +465,17 @@ const styles = {
   },
 
   searchWrap: {
-    borderRadius: 14,
-    border: "1px solid #1f1f1f",
-    background: "#0f0f0f",
+    borderRadius: 16,
+    border: "1px solid rgba(255,255,255,0.10)",
+    background: "rgba(255,255,255,0.04)",
     padding: 10,
   },
   search: {
     width: "100%",
     padding: "10px 12px",
     borderRadius: 12,
-    border: "1px solid rgba(255,255,255,0.16)",
-    background: "rgba(255,255,255,0.06)",
+    border: "1px solid rgba(255,255,255,0.14)",
+    background: "rgba(0,0,0,0.22)",
     color: "white",
     outline: "none",
     fontWeight: 800,
@@ -425,21 +485,35 @@ const styles = {
   nav: { display: "grid", gap: 8, marginTop: 2 },
   navItem: {
     padding: "10px 12px",
-    borderRadius: 12,
+    borderRadius: 14,
     textDecoration: "none",
     color: "white",
-    border: "1px solid #1f1f1f",
-    background: "#0f0f0f",
+    border: "1px solid rgba(255,255,255,0.10)",
+    background: "rgba(255,255,255,0.03)",
     fontWeight: 900,
-    opacity: 0.9,
+    opacity: 0.92,
     display: "flex",
     alignItems: "center",
+    justifyContent: "space-between",
     gap: 10,
+    transition: "transform 0.05s ease, background 0.15s ease, border 0.15s ease",
   },
   navItemActive: {
     background: "rgba(255,255,255,0.10)",
     border: "1px solid rgba(255,255,255,0.18)",
     opacity: 1,
+  },
+  navDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 999,
+    background: "rgba(255,255,255,0.35)",
+    boxShadow: "0 0 0 3px rgba(255,255,255,0.06)",
+    flexShrink: 0,
+  },
+  navArrow: {
+    opacity: 0.5,
+    fontWeight: 950,
   },
 
   sidebarBottom: { marginTop: "auto", display: "grid", gap: 10 },
@@ -448,9 +522,9 @@ const styles = {
     alignItems: "center",
     gap: 10,
     padding: 10,
-    borderRadius: 14,
-    border: "1px solid #1f1f1f",
-    background: "#111",
+    borderRadius: 16,
+    border: "1px solid rgba(255,255,255,0.10)",
+    background: "rgba(255,255,255,0.04)",
   },
   userDot: {
     width: 10,
@@ -468,47 +542,48 @@ const styles = {
     overflow: "hidden",
     textOverflow: "ellipsis",
     whiteSpace: "nowrap",
-    maxWidth: 170,
+    maxWidth: 180,
   },
   sideHint: {
     fontSize: 12,
     opacity: 0.65,
     lineHeight: 1.4,
     padding: 10,
-    borderRadius: 14,
-    border: "1px solid #1f1f1f",
-    background: "#0f0f0f",
+    borderRadius: 16,
+    border: "1px solid rgba(255,255,255,0.10)",
+    background: "rgba(255,255,255,0.03)",
   },
 
   // Main area
   main: { display: "flex", flexDirection: "column", minWidth: 0 },
   topbar: {
-    height: 60,
-    borderBottom: "1px solid #1f1f1f",
+    height: 64,
+    borderBottom: "1px solid rgba(255,255,255,0.08)",
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
     padding: "0 18px",
-    background: "rgba(11,11,11,0.85)",
-    backdropFilter: "blur(10px)",
+    background: "rgba(10,10,10,0.72)",
+    backdropFilter: "blur(12px)",
     position: "sticky",
     top: 0,
     zIndex: 50,
   },
   topbarLeft: { display: "flex", alignItems: "center", gap: 10, minWidth: 0 },
   breadcrumb: {
-    fontWeight: 950,
-    opacity: 0.9,
+    fontWeight: 900,
+    opacity: 0.95,
     overflow: "hidden",
     textOverflow: "ellipsis",
     whiteSpace: "nowrap",
+    letterSpacing: -0.2,
   },
-  topbarRight: { display: "flex", gap: 10 },
+  topbarRight: { display: "flex", gap: 10, alignItems: "center" },
 
   topBtn: {
     padding: "8px 12px",
     borderRadius: 999,
-    border: "1px solid rgba(255,255,255,0.16)",
+    border: "1px solid rgba(255,255,255,0.14)",
     background: "rgba(255,255,255,0.06)",
     color: "white",
     fontWeight: 900,
@@ -523,13 +598,13 @@ const styles = {
   },
 
   content: { padding: 18, minWidth: 0 },
-  container: { maxWidth: 1100, margin: "0 auto", width: "100%" },
+  container: { maxWidth: 1120, margin: "0 auto", width: "100%" },
 
   // Mobile
   mobileMenuBtn: {
     padding: "8px 10px",
-    borderRadius: 10,
-    border: "1px solid rgba(255,255,255,0.16)",
+    borderRadius: 12,
+    border: "1px solid rgba(255,255,255,0.14)",
     background: "rgba(255,255,255,0.06)",
     color: "white",
     fontWeight: 900,
@@ -540,7 +615,7 @@ const styles = {
   overlay: {
     position: "fixed",
     inset: 0,
-    background: "rgba(0,0,0,0.55)",
+    background: "rgba(0,0,0,0.60)",
     zIndex: 80,
     transition: "opacity 160ms ease",
   },
@@ -550,7 +625,7 @@ const styles = {
     top: 0,
     left: 0,
     bottom: 0,
-    width: 300,
+    width: 320,
     zIndex: 90,
     transition: "transform 180ms ease",
   },
