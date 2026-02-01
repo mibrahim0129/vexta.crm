@@ -1,10 +1,23 @@
-// app/dashboard/layout.js
 "use client";
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { supabaseBrowser } from "@/lib/supabase/browser";
+
+function parseCsv(value) {
+  return (value || "")
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+function isAllowedEmail(email) {
+  const e = (email || "").toLowerCase();
+  const allow = parseCsv(process.env.NEXT_PUBLIC_BETA_ALLOWLIST);
+  const admins = parseCsv(process.env.NEXT_PUBLIC_ADMIN_EMAILS);
+  return admins.includes(e) || allow.includes(e);
+}
 
 export default function DashboardLayout({ children }) {
   const pathname = usePathname();
@@ -64,13 +77,23 @@ export default function DashboardLayout({ children }) {
     async function boot() {
       setGateError("");
 
+      const betaOpen = process.env.NEXT_PUBLIC_BETA_MODE === "true";
+
       // 1) Quick check
       const { data } = await sb.auth.getSession();
       if (!alive) return;
 
       if (data?.session) {
         const session = data.session;
-        setEmail(session.user?.email || "");
+        const userEmail = session.user?.email || "";
+        setEmail(userEmail);
+
+        // ✅ Beta gating: when beta is closed, only allow allowlisted/admin emails
+        if (!betaOpen && !isAllowedEmail(userEmail)) {
+          router.replace("/beta-closed");
+          return;
+        }
+
         setAuthReady(true);
         return;
       }
@@ -79,9 +102,16 @@ export default function DashboardLayout({ children }) {
       const { data: sub } = sb.auth.onAuthStateChange(async (_event, session) => {
         if (!alive) return;
 
-        setEmail(session?.user?.email || "");
+        const userEmail = session?.user?.email || "";
+        setEmail(userEmail);
 
         if (session) {
+          // ✅ Beta gating: when beta is closed, only allow allowlisted/admin emails
+          if (!betaOpen && !isAllowedEmail(userEmail)) {
+            router.replace("/beta-closed");
+            return;
+          }
+
           setAuthReady(true);
           return;
         }
@@ -99,7 +129,15 @@ export default function DashboardLayout({ children }) {
         const { data: again } = await sb.auth.getSession();
         if (again?.session) {
           const session = again.session;
-          setEmail(session.user?.email || "");
+          const userEmail = session.user?.email || "";
+          setEmail(userEmail);
+
+          // ✅ Beta gating: when beta is closed, only allow allowlisted/admin emails
+          if (!betaOpen && !isAllowedEmail(userEmail)) {
+            router.replace("/beta-closed");
+            return;
+          }
+
           setAuthReady(true);
           return;
         }
@@ -251,11 +289,7 @@ export default function DashboardLayout({ children }) {
                 title={collapsed && !isDrawer ? item.label : undefined}
               >
                 <span style={{ display: "inline-flex", alignItems: "center", gap: 10, minWidth: 0 }}>
-                  {collapsed && !isDrawer ? (
-                    <span style={styles.navDot} aria-hidden="true" />
-                  ) : (
-                    <span style={styles.navDot} aria-hidden="true" />
-                  )}
+                  <span style={styles.navDot} aria-hidden="true" />
                   <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {collapsed && !isDrawer ? item.label : item.label}
                   </span>

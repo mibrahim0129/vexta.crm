@@ -2,13 +2,21 @@
 import { NextResponse } from "next/server";
 
 export function middleware(req) {
-  // No auth gating here (we're handling auth/subscription checks in-app)
-  // Keep middleware minimal to avoid redirect loops.
+  const betaOpen = process.env.NEXT_PUBLIC_BETA_MODE === "true";
+
+  // If beta is open, do nothing
+  if (betaOpen) return NextResponse.next();
+
+  // Beta is closed: if user isn't logged in, block dashboard routes
+  const hasSbCookie = req.cookies.getAll().some((c) => c.name.startsWith("sb-"));
+  if (!hasSbCookie) {
+    return NextResponse.redirect(new URL("/beta-closed", req.url));
+  }
+
+  // Logged-in users will be checked for allowlist in the dashboard layout
   return NextResponse.next();
 }
 
 export const config = {
-  // Only run middleware on app-protected areas.
-  // Do NOT include /login, /signup, or /auth/callback here unless you're actively doing redirects.
   matcher: ["/dashboard/:path*"],
 };
