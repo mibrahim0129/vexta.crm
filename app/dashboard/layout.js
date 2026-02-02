@@ -73,6 +73,25 @@ export default function DashboardLayout({ children }) {
   useEffect(() => {
     let alive = true;
     let unsubscribeAuth = null;
+    let kicked = false;
+
+    async function kickToBetaClosed(message) {
+      if (kicked) return;
+      kicked = true;
+
+      try {
+        setGateError(message || "You are not on the beta allowlist.");
+        setAuthReady(false);
+
+        // Hard kick: sign out so they can't "stick" in the dashboard after OAuth
+        await sb.auth.signOut();
+      } catch {
+        // ignore
+      } finally {
+        // Use replace so back button doesn't re-enter dashboard
+        router.replace("/beta-closed");
+      }
+    }
 
     async function boot() {
       try {
@@ -91,7 +110,7 @@ export default function DashboardLayout({ children }) {
 
           // ✅ Beta gating: when beta is closed, only allow allowlisted/admin emails
           if (!betaOpen && !isAllowedEmail(userEmail)) {
-            router.replace("/beta-closed");
+            await kickToBetaClosed("Beta access is closed for this email.");
             return;
           }
 
@@ -109,7 +128,7 @@ export default function DashboardLayout({ children }) {
           if (session) {
             // ✅ Beta gating: when beta is closed, only allow allowlisted/admin emails
             if (!betaOpen && !isAllowedEmail(userEmail)) {
-              router.replace("/beta-closed");
+              await kickToBetaClosed("Beta access is closed for this email.");
               return;
             }
 
@@ -136,7 +155,7 @@ export default function DashboardLayout({ children }) {
 
               // ✅ Beta gating: when beta is closed, only allow allowlisted/admin emails
               if (!betaOpen && !isAllowedEmail(userEmail)) {
-                router.replace("/beta-closed");
+                await kickToBetaClosed("Beta access is closed for this email.");
                 return;
               }
 
