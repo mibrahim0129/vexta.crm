@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { supabaseBrowser } from "@/lib/supabase/browser";
 
 function parseCsv(value) {
@@ -12,11 +12,19 @@ function parseCsv(value) {
     .filter(Boolean);
 }
 
+// NOTE: kept for backward compatibility (not relied on anymore for gating)
 function isAllowedEmail(email) {
   const e = (email || "").toLowerCase();
   const allow = parseCsv(process.env.NEXT_PUBLIC_BETA_ALLOWLIST);
   const admins = parseCsv(process.env.NEXT_PUBLIC_ADMIN_EMAILS);
   return admins.includes(e) || allow.includes(e);
+}
+
+// ✅ Runtime check (server truth)
+function isAllowedEmailFromLists(email, allowlist, admins) {
+  const e = (email || "").toLowerCase();
+  if (!e) return false;
+  return (admins || []).includes(e) || (allowlist || []).includes(e);
 }
 
 export default function DashboardLayout({ children }) {
@@ -34,6 +42,9 @@ export default function DashboardLayout({ children }) {
   // ✅ Mobile support
   const [isMobile, setIsMobile] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+
+  // Cache runtime config in-memory for this tab
+  const betaCfgRef = useRef({ ready: false, betaOpen: false, allowlist: [], admins: [] });
 
   useEffect(() => {
     const onResize = () => setIsMobile(window.innerWidth < 960);
@@ -93,11 +104,48 @@ export default function DashboardLayout({ children }) {
       }
     }
 
+    async function loadBetaConfig() {
+      if (betaCfgRef.current.ready) return betaCfgRef.current;
+
+      const res = await fetch("/api/beta-config", { cache: "no-store" });
+      const json = await res.json();
+
+      betaCfgRef.current = {
+        ready: true,
+        betaOpen: !!json?.betaOpen,
+        allowlist: Array.isArray(json?.allowlist) ? json.allowlist : [],
+        admins: Array.isArray(json?.admins) ? json.admins : [],
+      };
+
+      return betaCfgRef.current;
+    }
+
+    async function enforceBetaGate(userEmail) {
+      const cfg = await loadBetaConfig();
+      if (!alive) return false;
+
+      // If beta is closed => only allow allowlist/admin
+      if (!cfg.betaOpen) {
+        const ok = isAllowedEmailFromLists(userEmail, cfg.allowlist, cfg.admins);
+
+        // Fallback to client env (in case API route isn't reachable for some reason)
+        const fallbackOk = isAllowedEmail(userEmail);
+
+        if (!ok && !fallbackOk) {
+          await kickToBetaClosed("Beta access is closed for this email.");
+          return false;
+        }
+      }
+
+      return true;
+    }
+
     async function boot() {
       try {
         setGateError("");
 
-        const betaOpen = process.env.NEXT_PUBLIC_BETA_MODE === "true";
+        // Prime config early (prevents stale NEXT_PUBLIC issues)
+        await loadBetaConfig();
 
         // 1) Quick check
         const { data } = await sb.auth.getSession();
@@ -108,11 +156,8 @@ export default function DashboardLayout({ children }) {
           const userEmail = session.user?.email || "";
           setEmail(userEmail);
 
-          // ✅ Beta gating: when beta is closed, only allow allowlisted/admin emails
-          if (!betaOpen && !isAllowedEmail(userEmail)) {
-            await kickToBetaClosed("Beta access is closed for this email.");
-            return;
-          }
+          const ok = await enforceBetaGate(userEmail);
+          if (!ok) return;
 
           setAuthReady(true);
           return;
@@ -126,11 +171,8 @@ export default function DashboardLayout({ children }) {
           setEmail(userEmail);
 
           if (session) {
-            // ✅ Beta gating: when beta is closed, only allow allowlisted/admin emails
-            if (!betaOpen && !isAllowedEmail(userEmail)) {
-              await kickToBetaClosed("Beta access is closed for this email.");
-              return;
-            }
+            const ok = await enforceBetaGate(userEmail);
+            if (!ok) return;
 
             setAuthReady(true);
             return;
@@ -153,11 +195,8 @@ export default function DashboardLayout({ children }) {
               const userEmail = session.user?.email || "";
               setEmail(userEmail);
 
-              // ✅ Beta gating: when beta is closed, only allow allowlisted/admin emails
-              if (!betaOpen && !isAllowedEmail(userEmail)) {
-                await kickToBetaClosed("Beta access is closed for this email.");
-                return;
-              }
+              const ok = await enforceBetaGate(userEmail);
+              if (!ok) return;
 
               setAuthReady(true);
               return;
