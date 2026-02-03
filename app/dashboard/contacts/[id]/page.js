@@ -27,17 +27,13 @@ export default function ContactProfilePage() {
 
   const [showOnlyActiveDeal, setShowOnlyActiveDeal] = useState(false);
 
-  // Forms
-  const [noteForm, setNoteForm] = useState({
-    deal_id: "",
-    body: "",
-  });
+  // Timeline filters (simple but useful)
+  const [timelineFilter, setTimelineFilter] = useState("all"); // all | note | task | event | deal
 
-  const [dealForm, setDealForm] = useState({
-    title: "",
-    status: "lead",
-    value: "",
-  });
+  // Forms
+  const [noteForm, setNoteForm] = useState({ deal_id: "", body: "" });
+
+  const [dealForm, setDealForm] = useState({ title: "", status: "lead", value: "" });
 
   const [taskForm, setTaskForm] = useState({
     deal_id: "",
@@ -63,37 +59,6 @@ export default function ContactProfilePage() {
     }
     return data.session;
   }
-
-  function getActiveDealId() {
-    return contact?.active_deal_id || "";
-  }
-
-  function getDealNameById(id) {
-    const d = deals.find((x) => x.id === id);
-    return d?.title || "—";
-  }
-
-  function filteredByDeal(list, dealId) {
-    if (!dealId) return list;
-    return list.filter((x) => x.deal_id === dealId);
-  }
-
-  const activeDealId = getActiveDealId();
-
-  const visibleNotes = showOnlyActiveDeal ? filteredByDeal(notes, activeDealId) : notes;
-  const visibleTasks = showOnlyActiveDeal ? filteredByDeal(tasks, activeDealId) : tasks;
-  const visibleEvents = showOnlyActiveDeal ? filteredByDeal(events, activeDealId) : events;
-
-  const openTasksCount = tasks.filter((t) => !t.completed).length;
-
-  const nextEvent = [...events]
-    .filter((e) => e?.start_at)
-    .sort((a, b) => String(a.start_at).localeCompare(String(b.start_at)))[0];
-
-  const totalDealValue = deals.reduce((sum, d) => {
-    const v = Number(d?.value ?? 0);
-    return sum + (Number.isFinite(v) ? v : 0);
-  }, 0);
 
   function safeDate(x) {
     try {
@@ -124,42 +89,154 @@ export default function ContactProfilePage() {
     return `${d}d ago`;
   }
 
+  function getActiveDealId() {
+    return contact?.active_deal_id || "";
+  }
+
+  function getDealNameById(id) {
+    const d = deals.find((x) => x.id === id);
+    return d?.title || "—";
+  }
+
+  function filteredByDeal(list, dealId) {
+    if (!dealId) return list;
+    return list.filter((x) => String(x.deal_id || "") === String(dealId));
+  }
+
+  const activeDealId = getActiveDealId();
+
+  const visibleNotes = showOnlyActiveDeal ? filteredByDeal(notes, activeDealId) : notes;
+  const visibleTasks = showOnlyActiveDeal ? filteredByDeal(tasks, activeDealId) : tasks;
+  const visibleEvents = showOnlyActiveDeal ? filteredByDeal(events, activeDealId) : events;
+
+  const openTasksCount = tasks.filter((t) => !t.completed).length;
+
+  const nextEvent = [...events]
+    .filter((e) => e?.start_at)
+    .sort((a, b) => String(a.start_at).localeCompare(String(b.start_at)))[0];
+
+  const totalDealValue = deals.reduce((sum, d) => {
+    const v = Number(d?.value ?? 0);
+    return sum + (Number.isFinite(v) ? v : 0);
+  }, 0);
+
+  // ======================
+  // RLS-safe helpers
+  // ======================
+  async function rlsDelete(table, id) {
+    const session = await requireSession();
+    if (!session) return;
+
+    const { error } = await sb.from(table).delete().eq("id", id).eq("user_id", session.user.id);
+    if (error) throw error;
+  }
+
+  async function rlsUpdate(table, id, patch, select = "*") {
+    const session = await requireSession();
+    if (!session) return null;
+
+    const { data, error } = await sb
+      .from(table)
+      .update(patch)
+      .eq("id", id)
+      .eq("user_id", session.user.id)
+      .select(select)
+      .single();
+
+    if (error) throw error;
+    return data;
+  }
+
+  // ======================
+  // Loaders (split up)
+  // ======================
+  async function loadContact() {
+    const session = await requireSession();
+    if (!session) return null;
+
+    const { data, error } = await sb
+      .from("contacts")
+      .select("id, first_name, last_name, email, phone, created_at, user_id, active_deal_id")
+      .eq("id", contactId)
+      .eq("user_id", session.user.id)
+      .single();
+
+    if (error) throw error;
+    setContact(data || null);
+    return data || null;
+  }
+
+  async function loadDeals() {
+    const session = await requireSession();
+    if (!session) return;
+
+    const { data, error } = await sb
+      .from("deals")
+      .select("*")
+      .eq("contact_id", contactId)
+      .eq("user_id", session.user.id)
+      .order("created_at", { ascending: false });
+
+    if (error) throw error;
+    setDeals(Array.isArray(data) ? data : []);
+  }
+
+  async function loadNotes() {
+    const session = await requireSession();
+    if (!session) return;
+
+    const { data, error } = await sb
+      .from("notes")
+      .select("*")
+      .eq("contact_id", contactId)
+      .eq("user_id", session.user.id)
+      .order("created_at", { ascending: false });
+
+    if (error) throw error;
+    setNotes(Array.isArray(data) ? data : []);
+  }
+
+  async function loadTasks() {
+    const session = await requireSession();
+    if (!session) return;
+
+    const { data, error } = await sb
+      .from("tasks")
+      .select("*")
+      .eq("contact_id", contactId)
+      .eq("user_id", session.user.id)
+      .order("created_at", { ascending: false });
+
+    if (error) throw error;
+    setTasks(Array.isArray(data) ? data : []);
+  }
+
+  async function loadEvents() {
+    const session = await requireSession();
+    if (!session) return;
+
+    const { data, error } = await sb
+      .from("calendar_events")
+      .select("*")
+      .eq("contact_id", contactId)
+      .eq("user_id", session.user.id)
+      .order("start_at", { ascending: true });
+
+    if (error) throw error;
+    setEvents(Array.isArray(data) ? data : []);
+  }
+
   async function loadAll() {
     if (!contactId) return;
 
     setErr("");
     setLoading(true);
-
     try {
-      const session = await requireSession();
-      if (!session) return;
+      const c = await loadContact();
+      await Promise.all([loadDeals(), loadNotes(), loadTasks(), loadEvents()]);
 
-      const [cRes, dRes, nRes, tRes, eRes] = await Promise.all([
-        sb
-          .from("contacts")
-          .select("id, first_name, last_name, email, phone, created_at, user_id, active_deal_id")
-          .eq("id", contactId)
-          .single(),
-        sb.from("deals").select("*").eq("contact_id", contactId).order("created_at", { ascending: false }),
-        sb.from("notes").select("*").eq("contact_id", contactId).order("created_at", { ascending: false }),
-        sb.from("tasks").select("*").eq("contact_id", contactId).order("created_at", { ascending: false }),
-        sb.from("calendar_events").select("*").eq("contact_id", contactId).order("start_at", { ascending: true }),
-      ]);
-
-      if (cRes.error) throw cRes.error;
-
-      const otherErr =
-        dRes.error?.message || nRes.error?.message || tRes.error?.message || eRes.error?.message || "";
-      if (otherErr) setErr(otherErr);
-
-      setContact(cRes.data || null);
-      setDeals(Array.isArray(dRes.data) ? dRes.data : []);
-      setNotes(Array.isArray(nRes.data) ? nRes.data : []);
-      setTasks(Array.isArray(tRes.data) ? tRes.data : []);
-      setEvents(Array.isArray(eRes.data) ? eRes.data : []);
-
-      // keep forms in sync with active deal (only if user hasn't chosen a deal manually yet)
-      const a = cRes.data?.active_deal_id || "";
+      // keep forms synced to active deal if user hasn't chosen manually
+      const a = c?.active_deal_id || "";
       setNoteForm((p) => (p.deal_id ? p : { ...p, deal_id: a }));
       setTaskForm((p) => (p.deal_id ? p : { ...p, deal_id: a }));
       setEventForm((p) => (p.deal_id ? p : { ...p, deal_id: a }));
@@ -176,38 +253,39 @@ export default function ContactProfilePage() {
     }
   }
 
+  // ✅ Fix realtime cleanup + only reload what changed
   useEffect(() => {
     mountedRef.current = true;
+    let channel;
 
     (async () => {
       await loadAll();
-
       if (!contactId) return;
 
-      const channel = sb.channel(`contact-${contactId}-rt`);
+      channel = sb.channel(`contact-${contactId}-rt`);
       channel
         .on("postgres_changes", { event: "*", schema: "public", table: "contacts" }, () => {
-          if (mountedRef.current) loadAll();
+          if (mountedRef.current) loadContact();
         })
         .on("postgres_changes", { event: "*", schema: "public", table: "deals" }, () => {
-          if (mountedRef.current) loadAll();
+          if (mountedRef.current) loadDeals();
         })
         .on("postgres_changes", { event: "*", schema: "public", table: "notes" }, () => {
-          if (mountedRef.current) loadAll();
+          if (mountedRef.current) loadNotes();
         })
         .on("postgres_changes", { event: "*", schema: "public", table: "tasks" }, () => {
-          if (mountedRef.current) loadAll();
+          if (mountedRef.current) loadTasks();
         })
         .on("postgres_changes", { event: "*", schema: "public", table: "calendar_events" }, () => {
-          if (mountedRef.current) loadAll();
+          if (mountedRef.current) loadEvents();
         })
         .subscribe((status) => setRtStatus(String(status || "").toLowerCase()));
-
-      return () => {
-        mountedRef.current = false;
-        sb.removeChannel(channel);
-      };
     })();
+
+    return () => {
+      mountedRef.current = false;
+      if (channel) sb.removeChannel(channel);
+    };
 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [contactId]);
@@ -220,10 +298,12 @@ export default function ContactProfilePage() {
 
       const payload = { active_deal_id: dealIdOrNull || null };
 
+      // ✅ RLS-safe: include user_id
       const { data, error } = await sb
         .from("contacts")
         .update(payload)
         .eq("id", contactId)
+        .eq("user_id", session.user.id)
         .select("id, active_deal_id")
         .single();
 
@@ -254,12 +334,10 @@ export default function ContactProfilePage() {
       const session = await requireSession();
       if (!session) return;
 
-      const dealId = noteForm.deal_id ? noteForm.deal_id : null;
-
       const payload = {
         user_id: session.user.id,
         contact_id: contactId,
-        deal_id: dealId,
+        deal_id: noteForm.deal_id ? noteForm.deal_id : null,
         body,
       };
 
@@ -282,12 +360,7 @@ export default function ContactProfilePage() {
     if (!ok) return;
 
     try {
-      const session = await requireSession();
-      if (!session) return;
-
-      const { error } = await sb.from("notes").delete().eq("id", noteId);
-      if (error) throw error;
-
+      await rlsDelete("notes", noteId);
       setNotes((prev) => prev.filter((n) => n.id !== noteId));
     } catch (e) {
       console.error(e);
@@ -325,7 +398,6 @@ export default function ContactProfilePage() {
       setDeals((prev) => [data, ...prev]);
       setDealForm({ title: "", status: "lead", value: "" });
 
-      // If no active deal yet, auto-set this as active (big UX win)
       if (!activeDealId) {
         await setActiveDeal(data.id);
       }
@@ -352,12 +424,10 @@ export default function ContactProfilePage() {
       const session = await requireSession();
       if (!session) return;
 
-      const dealId = taskForm.deal_id ? taskForm.deal_id : null;
-
       const payload = {
         user_id: session.user.id,
         contact_id: contactId,
-        deal_id: dealId,
+        deal_id: taskForm.deal_id ? taskForm.deal_id : null,
         title,
         description: taskForm.description.trim() ? taskForm.description.trim() : null,
         due_at: dueIso,
@@ -380,19 +450,9 @@ export default function ContactProfilePage() {
   async function toggleTask(task) {
     setErr("");
     try {
-      const session = await requireSession();
-      if (!session) return;
-
-      const { data, error } = await sb
-        .from("tasks")
-        .update({ completed: !task.completed })
-        .eq("id", task.id)
-        .select("*")
-        .single();
-
-      if (error) throw error;
-
-      setTasks((prev) => prev.map((t) => (t.id === task.id ? data : t)));
+      const updated = await rlsUpdate("tasks", task.id, { completed: !task.completed }, "*");
+      if (!updated) return;
+      setTasks((prev) => prev.map((t) => (t.id === task.id ? updated : t)));
     } catch (e) {
       console.error(e);
       setErr(e?.message || "Failed to update task");
@@ -405,12 +465,7 @@ export default function ContactProfilePage() {
     if (!ok) return;
 
     try {
-      const session = await requireSession();
-      if (!session) return;
-
-      const { error } = await sb.from("tasks").delete().eq("id", taskId);
-      if (error) throw error;
-
+      await rlsDelete("tasks", taskId);
       setTasks((prev) => prev.filter((t) => t.id !== taskId));
     } catch (e) {
       console.error(e);
@@ -437,12 +492,10 @@ export default function ContactProfilePage() {
       const session = await requireSession();
       if (!session) return;
 
-      const dealId = eventForm.deal_id ? eventForm.deal_id : null;
-
       const payload = {
         user_id: session.user.id,
         contact_id: contactId,
-        deal_id: dealId,
+        deal_id: eventForm.deal_id ? eventForm.deal_id : null,
         title,
         location: eventForm.location.trim() ? eventForm.location.trim() : null,
         start_at: start.toISOString(),
@@ -474,12 +527,7 @@ export default function ContactProfilePage() {
     if (!ok) return;
 
     try {
-      const session = await requireSession();
-      if (!session) return;
-
-      const { error } = await sb.from("calendar_events").delete().eq("id", eventId);
-      if (error) throw error;
-
+      await rlsDelete("calendar_events", eventId);
       setEvents((prev) => prev.filter((x) => x.id !== eventId));
     } catch (e) {
       console.error(e);
@@ -487,19 +535,17 @@ export default function ContactProfilePage() {
     }
   }
 
-  // ===== Activity Timeline (read-only) =====
+  // ===== Activity Timeline =====
   function buildTimelineItems({ dealsList, notesList, tasksList, eventsList, activeDeal, onlyActive }) {
     const dealFilter = onlyActive && activeDeal ? activeDeal : null;
 
     const filterDeal = (x) => {
       if (!dealFilter) return true;
-      // Some items may have deal_id null
       return String(x?.deal_id || "") === String(dealFilter);
     };
 
     const items = [];
 
-    // Notes
     for (const n of Array.isArray(notesList) ? notesList : []) {
       if (!filterDeal(n)) continue;
       items.push({
@@ -509,13 +555,10 @@ export default function ContactProfilePage() {
         at: n.created_at || null,
         title: "Note added",
         body: n.body || "",
-        meta: {
-          dealTitle: n.deal_id ? getDealNameById(n.deal_id) : "—",
-        },
+        meta: { dealTitle: n.deal_id ? getDealNameById(n.deal_id) : "—" },
       });
     }
 
-    // Tasks
     for (const t of Array.isArray(tasksList) ? tasksList : []) {
       if (!filterDeal(t)) continue;
       items.push({
@@ -534,7 +577,6 @@ export default function ContactProfilePage() {
       });
     }
 
-    // Calendar Events
     for (const ev of Array.isArray(eventsList) ? eventsList : []) {
       if (!filterDeal(ev)) continue;
       items.push({
@@ -552,10 +594,8 @@ export default function ContactProfilePage() {
       });
     }
 
-    // Deals (created + status)
     for (const d of Array.isArray(dealsList) ? dealsList : []) {
       if (dealFilter && String(d.id) !== String(dealFilter)) continue;
-
       items.push({
         type: "deal",
         id: d.id,
@@ -564,13 +604,10 @@ export default function ContactProfilePage() {
         title: "Deal created",
         body: d.title || "Untitled deal",
         sub: d.status ? `Status: ${d.status}` : "",
-        meta: {
-          value: d.value ?? 0,
-        },
+        meta: { value: d.value ?? 0 },
       });
     }
 
-    // Sort newest first by timestamp
     items.sort((a, b) => {
       const ad = safeDate(a.at)?.getTime() ?? 0;
       const bd = safeDate(b.at)?.getTime() ?? 0;
@@ -623,7 +660,7 @@ export default function ContactProfilePage() {
   const email = contact.email || "—";
   const phone = contact.phone || "—";
 
-  const timeline = buildTimelineItems({
+  const timelineAll = buildTimelineItems({
     dealsList: deals,
     notesList: notes,
     tasksList: tasks,
@@ -631,6 +668,9 @@ export default function ContactProfilePage() {
     activeDeal: activeDealId,
     onlyActive: showOnlyActiveDeal,
   });
+
+  const timeline =
+    timelineFilter === "all" ? timelineAll : timelineAll.filter((x) => x.type === timelineFilter);
 
   return (
     <div>
@@ -689,7 +729,9 @@ export default function ContactProfilePage() {
 
         <span style={{ opacity: 0.65, fontSize: 12 }}>
           Active deal:{" "}
-          <span style={{ fontWeight: 950, opacity: 0.95 }}>{activeDealId ? getDealNameById(activeDealId) : "None"}</span>
+          <span style={{ fontWeight: 950, opacity: 0.95 }}>
+            {activeDealId ? getDealNameById(activeDealId) : "None"}
+          </span>
         </span>
 
         <button
@@ -709,7 +751,7 @@ export default function ContactProfilePage() {
         ) : null}
       </div>
 
-      {/* Timeline (NEW) */}
+      {/* Timeline */}
       <div style={{ marginTop: 18, ...styles.card }}>
         <div style={styles.cardHeader}>
           <h2 style={styles.h2}>
@@ -717,8 +759,27 @@ export default function ContactProfilePage() {
             {showOnlyActiveDeal && activeDealId ? " filtered" : ""})
           </h2>
           <div style={{ opacity: 0.75, fontSize: 13, fontWeight: 900 }}>
-            Newest first • {timeline.length ? `Last: ${timeAgo(timeline[0]?.at)}` : "No activity yet"}
+            Newest first • {timelineAll.length ? `Last: ${timeAgo(timelineAll[0]?.at)}` : "No activity yet"}
           </div>
+        </div>
+
+        <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {[
+            ["all", "All"],
+            ["note", "Notes"],
+            ["task", "Tasks"],
+            ["event", "Events"],
+            ["deal", "Deals"],
+          ].map(([k, label]) => (
+            <button
+              key={k}
+              onClick={() => setTimelineFilter(k)}
+              type="button"
+              style={k === timelineFilter ? styles.btnPrimarySmall : styles.btnGhost}
+            >
+              {label}
+            </button>
+          ))}
         </div>
 
         {timeline.length === 0 ? (
@@ -740,20 +801,27 @@ export default function ContactProfilePage() {
                       <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
                         <span style={{ ...styles.tagBase, ...tag.style }}>{tag.label}</span>
                         <div style={{ fontWeight: 950 }}>{it.title}</div>
-                        <div style={{ opacity: 0.65, fontSize: 12 }}>{fmt(it.at)} • {timeAgo(it.at)}</div>
+                        <div style={{ opacity: 0.65, fontSize: 12 }}>
+                          {fmt(it.at)} • {timeAgo(it.at)}
+                        </div>
                       </div>
 
                       <div style={{ marginTop: 8, whiteSpace: "pre-wrap", lineHeight: 1.5, opacity: 0.95 }}>
                         {it.body}
                       </div>
 
-                      {it.sub ? (
-                        <div style={{ marginTop: 8, opacity: 0.85, fontSize: 13 }}>
-                          {it.sub}
-                        </div>
-                      ) : null}
+                      {it.sub ? <div style={{ marginTop: 8, opacity: 0.85, fontSize: 13 }}>{it.sub}</div> : null}
 
-                      <div style={{ marginTop: 10, display: "flex", gap: 10, flexWrap: "wrap", fontSize: 13, opacity: 0.95 }}>
+                      <div
+                        style={{
+                          marginTop: 10,
+                          display: "flex",
+                          gap: 10,
+                          flexWrap: "wrap",
+                          fontSize: 13,
+                          opacity: 0.95,
+                        }}
+                      >
                         <div>
                           <span style={{ opacity: 0.75 }}>Deal:</span>{" "}
                           <span style={{ fontWeight: 900 }}>{dealLabel}</span>
@@ -784,7 +852,6 @@ export default function ContactProfilePage() {
                   </div>
 
                   <div style={styles.timelineRight}>
-                    {/* Optional: quick nav links (read-only) */}
                     {it.type === "deal" ? (
                       <Link href={`/dashboard/deals/${it.id}`} style={styles.timelineLink}>
                         Open Deal →
@@ -795,9 +862,9 @@ export default function ContactProfilePage() {
               );
             })}
 
-            {timeline.length > 30 ? (
+            {timelineAll.length > 30 ? (
               <div style={{ marginTop: 4, opacity: 0.7, fontSize: 12 }}>
-                Showing newest 30 items. (We can add pagination later if needed.)
+                Showing newest 30 items.
               </div>
             ) : null}
           </div>
@@ -821,11 +888,7 @@ export default function ContactProfilePage() {
                 style={styles.input}
               />
 
-              <select
-                value={dealForm.status}
-                onChange={(e) => setDealForm((p) => ({ ...p, status: e.target.value }))}
-                style={styles.select}
-              >
+              <select value={dealForm.status} onChange={(e) => setDealForm((p) => ({ ...p, status: e.target.value }))} style={styles.select}>
                 <option value="lead">lead</option>
                 <option value="active">active</option>
                 <option value="under_contract">under_contract</option>
@@ -855,10 +918,7 @@ export default function ContactProfilePage() {
                   <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" }}>
                     <div style={{ display: "grid", gap: 6 }}>
                       <div style={{ fontWeight: 950 }}>
-                        <Link
-                          href={`/dashboard/deals/${d.id}`}
-                          style={{ color: "white", fontWeight: 950, textDecoration: "underline" }}
-                        >
+                        <Link href={`/dashboard/deals/${d.id}`} style={{ color: "white", fontWeight: 950, textDecoration: "underline" }}>
                           {d.title}
                         </Link>
                       </div>
@@ -869,9 +929,7 @@ export default function ContactProfilePage() {
                         <span style={{ opacity: 0.75 }}>• Value:</span>{" "}
                         <span style={{ fontWeight: 900 }}>{d.value ?? 0}</span>
                       </div>
-                      <div style={{ opacity: 0.7, fontSize: 12 }}>
-                        Created: {d.created_at ? new Date(d.created_at).toLocaleString() : "—"}
-                      </div>
+                      <div style={{ opacity: 0.7, fontSize: 12 }}>Created: {d.created_at ? new Date(d.created_at).toLocaleString() : "—"}</div>
                     </div>
 
                     <button
@@ -899,11 +957,7 @@ export default function ContactProfilePage() {
           </div>
 
           <form onSubmit={addNote} style={styles.form}>
-            <select
-              value={noteForm.deal_id}
-              onChange={(e) => setNoteForm((p) => ({ ...p, deal_id: e.target.value }))}
-              style={styles.select}
-            >
+            <select value={noteForm.deal_id} onChange={(e) => setNoteForm((p) => ({ ...p, deal_id: e.target.value }))} style={styles.select}>
               <option value="">No deal (optional)</option>
               {deals.map((d) => (
                 <option key={d.id} value={d.id}>
@@ -912,13 +966,7 @@ export default function ContactProfilePage() {
               ))}
             </select>
 
-            <textarea
-              value={noteForm.body}
-              onChange={(e) => setNoteForm((p) => ({ ...p, body: e.target.value }))}
-              placeholder="Write a note..."
-              style={styles.textarea}
-              rows={3}
-            />
+            <textarea value={noteForm.body} onChange={(e) => setNoteForm((p) => ({ ...p, body: e.target.value }))} placeholder="Write a note..." style={styles.textarea} rows={3} />
 
             <button type="submit" disabled={saving} style={styles.btnPrimary}>
               {saving ? "Saving..." : "Add Note"}
@@ -960,11 +1008,7 @@ export default function ContactProfilePage() {
           </div>
 
           <form onSubmit={addTask} style={styles.form}>
-            <select
-              value={taskForm.deal_id}
-              onChange={(e) => setTaskForm((p) => ({ ...p, deal_id: e.target.value }))}
-              style={styles.select}
-            >
+            <select value={taskForm.deal_id} onChange={(e) => setTaskForm((p) => ({ ...p, deal_id: e.target.value }))} style={styles.select}>
               <option value="">No deal (optional)</option>
               {deals.map((d) => (
                 <option key={d.id} value={d.id}>
@@ -973,27 +1017,11 @@ export default function ContactProfilePage() {
               ))}
             </select>
 
-            <input
-              value={taskForm.title}
-              onChange={(e) => setTaskForm((p) => ({ ...p, title: e.target.value }))}
-              placeholder="Task title..."
-              style={styles.input}
-            />
+            <input value={taskForm.title} onChange={(e) => setTaskForm((p) => ({ ...p, title: e.target.value }))} placeholder="Task title..." style={styles.input} />
 
-            <textarea
-              value={taskForm.description}
-              onChange={(e) => setTaskForm((p) => ({ ...p, description: e.target.value }))}
-              placeholder="Description (optional)..."
-              style={styles.textarea}
-              rows={2}
-            />
+            <textarea value={taskForm.description} onChange={(e) => setTaskForm((p) => ({ ...p, description: e.target.value }))} placeholder="Description (optional)..." style={styles.textarea} rows={2} />
 
-            <input
-              type="datetime-local"
-              value={taskForm.due_at}
-              onChange={(e) => setTaskForm((p) => ({ ...p, due_at: e.target.value }))}
-              style={{ ...styles.input, colorScheme: "dark" }}
-            />
+            <input type="datetime-local" value={taskForm.due_at} onChange={(e) => setTaskForm((p) => ({ ...p, due_at: e.target.value }))} style={{ ...styles.input, colorScheme: "dark" }} />
 
             <button type="submit" disabled={saving} style={styles.btnPrimary}>
               {saving ? "Saving..." : "Add Task"}
@@ -1008,25 +1036,12 @@ export default function ContactProfilePage() {
                 <div key={t.id} style={styles.item}>
                   <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
                     <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
-                      <button
-                        onClick={() => toggleTask(t)}
-                        style={t.completed ? styles.chkOn : styles.chkOff}
-                        title={t.completed ? "Mark as open" : "Mark as done"}
-                        type="button"
-                      />
+                      <button onClick={() => toggleTask(t)} style={t.completed ? styles.chkOn : styles.chkOff} title={t.completed ? "Mark as open" : "Mark as done"} type="button" />
                       <div style={{ display: "grid", gap: 4 }}>
-                        <div
-                          style={{
-                            fontWeight: 950,
-                            opacity: t.completed ? 0.55 : 1,
-                            textDecoration: t.completed ? "line-through" : "none",
-                          }}
-                        >
+                        <div style={{ fontWeight: 950, opacity: t.completed ? 0.55 : 1, textDecoration: t.completed ? "line-through" : "none" }}>
                           {t.title}
                         </div>
-                        {t.description ? (
-                          <div style={{ opacity: 0.85, whiteSpace: "pre-wrap", lineHeight: 1.45 }}>{t.description}</div>
-                        ) : null}
+                        {t.description ? <div style={{ opacity: 0.85, whiteSpace: "pre-wrap", lineHeight: 1.45 }}>{t.description}</div> : null}
                       </div>
                     </div>
 
@@ -1065,11 +1080,7 @@ export default function ContactProfilePage() {
           </div>
 
           <form onSubmit={addEvent} style={styles.form}>
-            <select
-              value={eventForm.deal_id}
-              onChange={(e) => setEventForm((p) => ({ ...p, deal_id: e.target.value }))}
-              style={styles.select}
-            >
+            <select value={eventForm.deal_id} onChange={(e) => setEventForm((p) => ({ ...p, deal_id: e.target.value }))} style={styles.select}>
               <option value="">No deal (optional)</option>
               {deals.map((d) => (
                 <option key={d.id} value={d.id}>
@@ -1078,42 +1089,16 @@ export default function ContactProfilePage() {
               ))}
             </select>
 
-            <input
-              value={eventForm.title}
-              onChange={(e) => setEventForm((p) => ({ ...p, title: e.target.value }))}
-              placeholder="Event title..."
-              style={styles.input}
-            />
+            <input value={eventForm.title} onChange={(e) => setEventForm((p) => ({ ...p, title: e.target.value }))} placeholder="Event title..." style={styles.input} />
 
-            <input
-              value={eventForm.location}
-              onChange={(e) => setEventForm((p) => ({ ...p, location: e.target.value }))}
-              placeholder="Location (optional)..."
-              style={styles.input}
-            />
+            <input value={eventForm.location} onChange={(e) => setEventForm((p) => ({ ...p, location: e.target.value }))} placeholder="Location (optional)..." style={styles.input} />
 
             <div style={styles.grid2}>
-              <input
-                type="datetime-local"
-                value={eventForm.start_at}
-                onChange={(e) => setEventForm((p) => ({ ...p, start_at: e.target.value }))}
-                style={{ ...styles.input, colorScheme: "dark" }}
-              />
-              <input
-                type="datetime-local"
-                value={eventForm.end_at}
-                onChange={(e) => setEventForm((p) => ({ ...p, end_at: e.target.value }))}
-                style={{ ...styles.input, colorScheme: "dark" }}
-              />
+              <input type="datetime-local" value={eventForm.start_at} onChange={(e) => setEventForm((p) => ({ ...p, start_at: e.target.value }))} style={{ ...styles.input, colorScheme: "dark" }} />
+              <input type="datetime-local" value={eventForm.end_at} onChange={(e) => setEventForm((p) => ({ ...p, end_at: e.target.value }))} style={{ ...styles.input, colorScheme: "dark" }} />
             </div>
 
-            <textarea
-              value={eventForm.notes}
-              onChange={(e) => setEventForm((p) => ({ ...p, notes: e.target.value }))}
-              placeholder="Notes (optional)..."
-              style={styles.textarea}
-              rows={2}
-            />
+            <textarea value={eventForm.notes} onChange={(e) => setEventForm((p) => ({ ...p, notes: e.target.value }))} placeholder="Notes (optional)..." style={styles.textarea} rows={2} />
 
             <button type="submit" disabled={saving} style={styles.btnPrimary}>
               {saving ? "Saving..." : "Add Event"}
@@ -1143,14 +1128,18 @@ export default function ContactProfilePage() {
 
                   <div style={styles.itemMeta}>
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
-                      <div style={{ opacity: 0.75 }}>Created: {ev.created_at ? new Date(ev.created_at).toLocaleString() : "—"}</div>
+                      <div style={{ opacity: 0.75 }}>
+                        Created: {ev.created_at ? new Date(ev.created_at).toLocaleString() : "—"}
+                      </div>
                       <div>
                         <span style={{ opacity: 0.75 }}>Deal:</span>{" "}
                         <span style={{ fontWeight: 900 }}>{ev.deal_id ? getDealNameById(ev.deal_id) : "—"}</span>
                       </div>
                     </div>
 
-                    <div style={{ opacity: 0.75 }}>Updated: {ev.updated_at ? new Date(ev.updated_at).toLocaleString() : "—"}</div>
+                    <div style={{ opacity: 0.75 }}>
+                      Updated: {ev.updated_at ? new Date(ev.updated_at).toLocaleString() : "—"}
+                    </div>
                   </div>
                 </div>
               ))}
@@ -1345,7 +1334,6 @@ const styles = {
     fontWeight: 900,
   },
 
-  // Timeline styles
   timelineRow: {
     padding: 14,
     borderRadius: 16,
