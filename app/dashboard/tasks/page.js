@@ -46,6 +46,15 @@ export default function TasksPage() {
     due_at: "",
   });
 
+  // ✅ Edit modal
+  const [editing, setEditing] = useState(null); // task object
+  const [editForm, setEditForm] = useState({
+    title: "",
+    description: "",
+    due_at: "",
+    deal_id: "",
+  });
+
   async function requireSession() {
     const { data } = await sb.auth.getSession();
     if (!data?.session) {
@@ -59,6 +68,20 @@ export default function TasksPage() {
     if (!v) return null;
     const d = new Date(v);
     return Number.isNaN(d.getTime()) ? null : d.toISOString();
+  }
+
+  function localDatetimeFromIso(iso) {
+    if (!iso) return "";
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return "";
+    // datetime-local wants "YYYY-MM-DDTHH:mm"
+    const pad = (n) => String(n).padStart(2, "0");
+    const yyyy = d.getFullYear();
+    const mm = pad(d.getMonth() + 1);
+    const dd = pad(d.getDate());
+    const hh = pad(d.getHours());
+    const mi = pad(d.getMinutes());
+    return `${yyyy}-${mm}-${dd}T${hh}:${mi}`;
   }
 
   function startOfTodayLocal() {
@@ -242,24 +265,33 @@ export default function TasksPage() {
     }
   }
 
+  // ✅ One safe update helper for tasks (fixes RLS + always returns updated row)
+  async function updateTask(taskId, patch) {
+    const session = await requireSession();
+    if (!session) return null;
+
+    const { data, error } = await sb
+      .from("tasks")
+      .update(patch)
+      .eq("id", taskId)
+      .eq("user_id", session.user.id) // ✅ critical for RLS
+      .select("*")
+      .single();
+
+    if (error) throw error;
+    return data;
+  }
+
   async function toggleTask(t) {
     setErr("");
 
     if (!requireWriteOrWarn("Upgrade required to complete tasks.")) return;
 
     try {
-      const session = await requireSession();
-      if (!session) return;
+      const updated = await updateTask(t.id, { completed: !t.completed });
+      if (!updated) return;
 
-      const { data, error } = await sb
-        .from("tasks")
-        .update({ completed: !t.completed })
-        .eq("id", t.id)
-        .select("*")
-        .single();
-
-      if (error) throw error;
-      setTasks((prev) => prev.map((x) => (x.id === t.id ? data : x)));
+      setTasks((prev) => prev.map((x) => (x.id === t.id ? updated : x)));
     } catch (e) {
       console.error(e);
       setErr(e?.message || "Failed to update task");
@@ -278,13 +310,61 @@ export default function TasksPage() {
       const session = await requireSession();
       if (!session) return;
 
-      const { error } = await sb.from("tasks").delete().eq("id", id);
+      const { error } = await sb.from("tasks").delete().eq("id", id).eq("user_id", session.user.id);
       if (error) throw error;
 
       setTasks((prev) => prev.filter((x) => x.id !== id));
     } catch (e) {
       console.error(e);
       setErr(e?.message || "Failed to delete task");
+    }
+  }
+
+  function openEdit(t) {
+    setErr("");
+    setEditing(t);
+    setEditForm({
+      title: t.title || "",
+      description: t.description || "",
+      due_at: localDatetimeFromIso(t.due_at),
+      deal_id: t.deal_id || "",
+    });
+  }
+
+  function closeEdit() {
+    if (saving) return;
+    setEditing(null);
+    setEditForm({ title: "", description: "", due_at: "", deal_id: "" });
+  }
+
+  async function saveEdit() {
+    setErr("");
+
+    if (!editing) return;
+    if (!requireWriteOrWarn("Upgrade required to edit tasks.")) return;
+
+    const title = (editForm.title || "").trim();
+    if (!title) return setErr("Task title can’t be empty.");
+
+    setSaving(true);
+    try {
+      const patch = {
+        title,
+        description: (editForm.description || "").trim() ? (editForm.description || "").trim() : null,
+        due_at: isoFromLocalDatetime(editForm.due_at),
+        deal_id: editForm.deal_id ? editForm.deal_id : null,
+      };
+
+      const updated = await updateTask(editing.id, patch);
+      if (!updated) return;
+
+      setTasks((prev) => prev.map((x) => (x.id === editing.id ? updated : x)));
+      closeEdit();
+    } catch (e) {
+      console.error(e);
+      setErr(e?.message || "Failed to update task");
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -313,10 +393,12 @@ export default function TasksPage() {
   useEffect(() => {
     mountedRef.current = true;
 
+    let channel;
+
     (async () => {
       await loadAll();
 
-      const channel = sb.channel("tasks-rt");
+      channel = sb.channel("tasks-rt");
       channel
         .on("postgres_changes", { event: "*", schema: "public", table: "tasks" }, () => {
           if (mountedRef.current) loadTasks();
@@ -328,12 +410,12 @@ export default function TasksPage() {
           if (mountedRef.current) loadDeals();
         })
         .subscribe((status) => setRtStatus(String(status || "").toLowerCase()));
-
-      return () => {
-        mountedRef.current = false;
-        sb.removeChannel(channel);
-      };
     })();
+
+    return () => {
+      mountedRef.current = false;
+      if (channel) sb.removeChannel(channel);
+    };
 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -446,20 +528,35 @@ export default function TasksPage() {
             </div>
           </div>
 
-          <button
-            onClick={() => deleteTask(t.id)}
-            style={{
-              ...styles.btnDanger,
-              ...(disableWrites ? { opacity: 0.55, cursor: "not-allowed" } : {}),
-            }}
-            type="button"
-            disabled={disableWrites}
-            title={
-              isBeta ? "Delete task" : subLoading ? "Checking plan…" : !canWrite ? "Upgrade required" : "Delete task"
-            }
-          >
-            Delete
-          </button>
+          <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+            <button
+              onClick={() => openEdit(t)}
+              style={{
+                ...styles.btnGhost,
+                ...(disableWrites ? { opacity: 0.55, cursor: "not-allowed" } : {}),
+              }}
+              type="button"
+              disabled={disableWrites}
+              title={isBeta ? "Edit task" : subLoading ? "Checking plan…" : !canWrite ? "Upgrade required" : "Edit task"}
+            >
+              Edit
+            </button>
+
+            <button
+              onClick={() => deleteTask(t.id)}
+              style={{
+                ...styles.btnDanger,
+                ...(disableWrites ? { opacity: 0.55, cursor: "not-allowed" } : {}),
+              }}
+              type="button"
+              disabled={disableWrites}
+              title={
+                isBeta ? "Delete task" : subLoading ? "Checking plan…" : !canWrite ? "Upgrade required" : "Delete task"
+              }
+            >
+              Delete
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -485,7 +582,11 @@ export default function TasksPage() {
           <p style={styles.sub}>
             Daily to-dos • Realtime: <span style={styles.badge}>{rtStatus}</span>{" "}
             <span style={{ opacity: 0.85 }}>
-              {isBeta ? " • Beta Mode (all features unlocked)" : subLoading ? " • Checking plan…" : ` • Plan: ${plan || "Free"}`}
+              {isBeta
+                ? " • Beta Mode (all features unlocked)"
+                : subLoading
+                ? " • Checking plan…"
+                : ` • Plan: ${plan || "Free"}`}
             </span>
           </p>
         </div>
@@ -502,7 +603,7 @@ export default function TasksPage() {
         <div style={{ marginTop: 14 }}>
           <UpgradeBanner
             title="Upgrade to use tasks"
-            body="You can view tasks, but creating, completing, and deleting tasks requires an active plan."
+            body="You can view tasks, but creating, completing, editing, and deleting tasks requires an active plan."
           />
         </div>
       ) : null}
@@ -606,7 +707,7 @@ export default function TasksPage() {
           {/* Beta: no upgrade warning */}
           {!isBeta && hasContacts && !subLoading && !access ? (
             <div style={{ marginTop: 6, opacity: 0.75, fontSize: 12 }}>
-              Creating/completing/deleting tasks is disabled until you upgrade.
+              Creating/completing/editing/deleting tasks is disabled until you upgrade.
             </div>
           ) : null}
         </form>
@@ -632,11 +733,7 @@ export default function TasksPage() {
             <option value="next7">Next 7 days</option>
           </select>
 
-          <select
-            value={filterContactId}
-            onChange={(e) => setFilterContactId(e.target.value)}
-            style={styles.selectSmall}
-          >
+          <select value={filterContactId} onChange={(e) => setFilterContactId(e.target.value)} style={styles.selectSmall}>
             <option value="all">All contacts</option>
             {contacts.map((c) => (
               <option key={c.id} value={c.id}>
@@ -716,6 +813,82 @@ export default function TasksPage() {
           </div>
         )}
       </div>
+
+      {/* ✅ Edit Modal */}
+      {editing ? (
+        <div
+          style={styles.modalOverlay}
+          onMouseDown={() => {
+            closeEdit();
+          }}
+        >
+          <div
+            style={styles.modal}
+            onMouseDown={(e) => {
+              e.stopPropagation();
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" }}>
+              <div style={{ fontWeight: 950, fontSize: 18 }}>Edit Task</div>
+              <button onClick={closeEdit} type="button" style={styles.btnGhost} disabled={saving}>
+                Close
+              </button>
+            </div>
+
+            <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
+              <input
+                value={editForm.title}
+                onChange={(e) => setEditForm((p) => ({ ...p, title: e.target.value }))}
+                placeholder="Task title..."
+                style={styles.input}
+                disabled={saving}
+              />
+
+              <textarea
+                value={editForm.description}
+                onChange={(e) => setEditForm((p) => ({ ...p, description: e.target.value }))}
+                placeholder="Description (optional)..."
+                style={styles.textarea}
+                rows={3}
+                disabled={saving}
+              />
+
+              <input
+                type="datetime-local"
+                value={editForm.due_at}
+                onChange={(e) => setEditForm((p) => ({ ...p, due_at: e.target.value }))}
+                style={{ ...styles.input, colorScheme: "dark" }}
+                disabled={saving}
+              />
+
+              <select
+                value={editForm.deal_id}
+                onChange={(e) => setEditForm((p) => ({ ...p, deal_id: e.target.value }))}
+                style={styles.select}
+                disabled={saving}
+              >
+                <option value="">No deal (optional)</option>
+                {deals
+                  .filter((d) => (editing?.contact_id ? d.contact_id === editing.contact_id : true))
+                  .map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.title}
+                    </option>
+                  ))}
+              </select>
+
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 6 }}>
+                <button onClick={closeEdit} type="button" style={styles.btnGhost} disabled={saving}>
+                  Cancel
+                </button>
+                <button onClick={saveEdit} type="button" style={styles.btnPrimary} disabled={saving}>
+                  {saving ? "Saving..." : "Save Changes"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -904,5 +1077,24 @@ const styles = {
     border: "1px solid #5a1f1f",
     color: "#ffd6d6",
     fontWeight: 900,
+  },
+
+  modalOverlay: {
+    position: "fixed",
+    inset: 0,
+    background: "rgba(0,0,0,0.45)",
+    display: "grid",
+    placeItems: "center",
+    padding: 14,
+    zIndex: 50,
+  },
+
+  modal: {
+    width: "100%",
+    maxWidth: 640,
+    background: "#0f0f0f",
+    border: "1px solid #242424",
+    borderRadius: 16,
+    padding: 16,
   },
 };
