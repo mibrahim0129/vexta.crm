@@ -12,7 +12,7 @@ export default function TasksPage() {
   const sb = useMemo(() => supabaseBrowser(), []);
   const mountedRef = useRef(false);
 
-  // ✅ Beta Mode toggle (no helpers)
+  // ✅ Beta Mode toggle
   const isBeta = process.env.NEXT_PUBLIC_BETA_MODE === "true";
 
   // ✅ Subscription (soft gating)
@@ -55,10 +55,10 @@ export default function TasksPage() {
     deal_id: "",
   });
 
-  async function requireSession() {
+  async function requireSession(next = "/dashboard/tasks") {
     const { data } = await sb.auth.getSession();
     if (!data?.session) {
-      window.location.href = "/login?next=/dashboard/tasks";
+      window.location.href = `/login?next=${encodeURIComponent(next)}`;
       return null;
     }
     return data.session;
@@ -74,7 +74,6 @@ export default function TasksPage() {
     if (!iso) return "";
     const d = new Date(iso);
     if (Number.isNaN(d.getTime())) return "";
-    // datetime-local wants "YYYY-MM-DDTHH:mm"
     const pad = (n) => String(n).padStart(2, "0");
     const yyyy = d.getFullYear();
     const mm = pad(d.getMonth() + 1);
@@ -88,12 +87,10 @@ export default function TasksPage() {
     const now = new Date();
     return new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
   }
-
   function endOfTodayLocal() {
     const now = new Date();
     return new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
   }
-
   function endOfNext7Local() {
     const start = startOfTodayLocal();
     return new Date(start.getTime() + 7 * 24 * 60 * 60 * 1000);
@@ -149,7 +146,6 @@ export default function TasksPage() {
   }
 
   function requireWriteOrWarn(message) {
-    // ✅ Beta: always allow
     if (isBeta) return true;
 
     if (subLoading) {
@@ -163,13 +159,15 @@ export default function TasksPage() {
     return true;
   }
 
-  async function loadContacts() {
+  async function loadContactsWithSession(session) {
     const { data, error } = await sb
       .from("contacts")
-      .select("id, first_name, last_name, created_at")
+      .select("id, first_name, last_name, created_at, user_id")
+      .eq("user_id", session.user.id) // ✅ RLS-safe
       .order("created_at", { ascending: false });
 
     if (error) throw error;
+
     const list = Array.isArray(data) ? data : [];
     setContacts(list);
 
@@ -179,44 +177,43 @@ export default function TasksPage() {
     });
   }
 
-  async function loadDeals() {
+  async function loadDealsWithSession(session) {
     const { data, error } = await sb
       .from("deals")
-      .select("id, title, contact_id, created_at")
+      .select("id, title, contact_id, created_at, user_id")
+      .eq("user_id", session.user.id) // ✅ RLS-safe
       .order("created_at", { ascending: false });
 
     if (error) throw error;
     setDeals(Array.isArray(data) ? data : []);
   }
 
-  async function loadTasks() {
-    const session = await requireSession();
-    if (!session) return;
+  async function loadTasksWithSession(session) {
+    // ✅ RLS-safe + controlled columns (faster than select("*"))
+    const { data, error } = await sb
+      .from("tasks")
+      .select("id, user_id, contact_id, deal_id, title, description, due_at, completed, created_at")
+      .eq("user_id", session.user.id) // ✅ critical
+      .order("created_at", { ascending: false })
+      .limit(500); // safety cap
 
-    setErr("");
-    setLoading(true);
-
-    try {
-      const { data, error } = await sb.from("tasks").select("*").order("created_at", { ascending: false });
-      if (error) throw error;
-      setTasks(Array.isArray(data) ? data : []);
-    } catch (e) {
-      console.error(e);
-      setErr(e?.message || "Failed to load tasks");
-      setTasks([]);
-    } finally {
-      setLoading(false);
-    }
+    if (error) throw error;
+    setTasks(Array.isArray(data) ? data : []);
   }
 
   async function loadAll() {
     setErr("");
     setLoading(true);
+
     try {
-      const session = await requireSession();
+      const session = await requireSession("/dashboard/tasks");
       if (!session) return;
 
-      await Promise.all([loadContacts(), loadDeals(), loadTasks()]);
+      await Promise.all([
+        loadContactsWithSession(session),
+        loadDealsWithSession(session),
+        loadTasksWithSession(session),
+      ]);
     } catch (e) {
       console.error(e);
       setErr(e?.message || "Failed to load data");
@@ -239,7 +236,7 @@ export default function TasksPage() {
 
     setSaving(true);
     try {
-      const session = await requireSession();
+      const session = await requireSession("/dashboard/tasks");
       if (!session) return;
 
       const payload = {
@@ -252,7 +249,12 @@ export default function TasksPage() {
         completed: false,
       };
 
-      const { data, error } = await sb.from("tasks").insert([payload]).select("*").single();
+      const { data, error } = await sb
+        .from("tasks")
+        .insert([payload])
+        .select("id, user_id, contact_id, deal_id, title, description, due_at, completed, created_at")
+        .single();
+
       if (error) throw error;
 
       setTasks((prev) => [data, ...prev]);
@@ -267,7 +269,7 @@ export default function TasksPage() {
 
   // ✅ One safe update helper for tasks (fixes RLS + always returns updated row)
   async function updateTask(taskId, patch) {
-    const session = await requireSession();
+    const session = await requireSession("/dashboard/tasks");
     if (!session) return null;
 
     const { data, error } = await sb
@@ -275,7 +277,7 @@ export default function TasksPage() {
       .update(patch)
       .eq("id", taskId)
       .eq("user_id", session.user.id) // ✅ critical for RLS
-      .select("*")
+      .select("id, user_id, contact_id, deal_id, title, description, due_at, completed, created_at")
       .single();
 
     if (error) throw error;
@@ -290,7 +292,6 @@ export default function TasksPage() {
     try {
       const updated = await updateTask(t.id, { completed: !t.completed });
       if (!updated) return;
-
       setTasks((prev) => prev.map((x) => (x.id === t.id ? updated : x)));
     } catch (e) {
       console.error(e);
@@ -307,7 +308,7 @@ export default function TasksPage() {
     if (!ok) return;
 
     try {
-      const session = await requireSession();
+      const session = await requireSession("/dashboard/tasks");
       if (!session) return;
 
       const { error } = await sb.from("tasks").delete().eq("id", id).eq("user_id", session.user.id);
@@ -401,13 +402,13 @@ export default function TasksPage() {
       channel = sb.channel("tasks-rt");
       channel
         .on("postgres_changes", { event: "*", schema: "public", table: "tasks" }, () => {
-          if (mountedRef.current) loadTasks();
+          if (mountedRef.current) loadAll();
         })
         .on("postgres_changes", { event: "*", schema: "public", table: "contacts" }, () => {
-          if (mountedRef.current) loadContacts();
+          if (mountedRef.current) loadAll();
         })
         .on("postgres_changes", { event: "*", schema: "public", table: "deals" }, () => {
-          if (mountedRef.current) loadDeals();
+          if (mountedRef.current) loadAll();
         })
         .subscribe((status) => setRtStatus(String(status || "").toLowerCase()));
     })();
@@ -457,7 +458,6 @@ export default function TasksPage() {
     const overdueFlag = isOverdue(t.due_at, t.completed);
     const todayFlag = !overdueFlag && isToday(t.due_at);
 
-    // ✅ In beta: never disable writes because of subscription
     const disableWrites = isBeta ? false : !canWrite || subLoading;
 
     return (
@@ -485,6 +485,7 @@ export default function TasksPage() {
               }
               type="button"
               disabled={disableWrites}
+              aria-label={t.completed ? "Mark task as open" : "Mark task as completed"}
             />
             <div style={{ display: "grid", gap: 6, minWidth: 0 }}>
               <div
@@ -550,9 +551,7 @@ export default function TasksPage() {
               }}
               type="button"
               disabled={disableWrites}
-              title={
-                isBeta ? "Delete task" : subLoading ? "Checking plan…" : !canWrite ? "Upgrade required" : "Delete task"
-              }
+              title={isBeta ? "Delete task" : subLoading ? "Checking plan…" : !canWrite ? "Upgrade required" : "Delete task"}
             >
               Delete
             </button>
@@ -592,7 +591,7 @@ export default function TasksPage() {
         </div>
 
         <div style={styles.headerRight}>
-          <button onClick={loadAll} disabled={loading} style={styles.btnGhost}>
+          <button onClick={loadAll} disabled={loading} style={styles.btnGhost} type="button">
             {loading ? "Refreshing..." : "Refresh"}
           </button>
         </div>
@@ -681,13 +680,7 @@ export default function TasksPage() {
             style={{
               ...styles.btnPrimary,
               ...(!canWrite || subLoading
-                ? {
-                    opacity: 0.55,
-                    cursor: "not-allowed",
-                    border: "1px solid #2a2a2a",
-                    background: "#141414",
-                    color: "#bdbdbd",
-                  }
+                ? { opacity: 0.55, cursor: "not-allowed", border: "1px solid #2a2a2a", background: "#141414", color: "#bdbdbd" }
                 : {}),
             }}
           >
@@ -704,7 +697,6 @@ export default function TasksPage() {
             </div>
           ) : null}
 
-          {/* Beta: no upgrade warning */}
           {!isBeta && hasContacts && !subLoading && !access ? (
             <div style={{ marginTop: 6, opacity: 0.75, fontSize: 12 }}>
               Creating/completing/editing/deleting tasks is disabled until you upgrade.
@@ -1044,7 +1036,7 @@ const styles = {
     padding: 14,
     borderRadius: 16,
     border: "1px solid #242424",
-    background: "#111111",
+    background: "#101010",
     display: "grid",
     gap: 10,
   },
@@ -1056,6 +1048,7 @@ const styles = {
     border: "1px solid rgba(255,255,255,0.22)",
     background: "rgba(255,255,255,0.06)",
     cursor: "pointer",
+    flexShrink: 0,
   },
 
   chkOn: {
@@ -1065,6 +1058,7 @@ const styles = {
     border: "1px solid rgba(255,255,255,0.22)",
     background: "#f5f5f5",
     cursor: "pointer",
+    flexShrink: 0,
   },
 
   link: { color: "white", fontWeight: 950, textDecoration: "underline" },
