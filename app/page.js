@@ -1,42 +1,7 @@
-// app/page.js
 "use client";
 
+// app/page.js
 import Link from "next/link";
-
-export const metadata = {
-  title: "Vexta CRM — Real Estate CRM",
-  description:
-    "Vexta CRM helps real estate agents manage contacts, deals, tasks, notes, and calendar events in one clean dashboard.",
-};
-
-function CheckIcon() {
-  return (
-    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" aria-hidden="true">
-      <path
-        d="M20 6L9 17l-5-5"
-        stroke="currentColor"
-        strokeWidth="2.2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-// ✅ Server-safe logo (no handlers)
-// Put your file at: /public/VLT.png
-function LogoMark() {
-  return <span className="logoMark" aria-hidden="true" />;
-}
-
-function FeatureCard({ title, desc }) {
-  return (
-    <div className="feature">
-      <div className="featureTitle">{title}</div>
-      <div className="featureDesc">{desc}</div>
-    </div>
-  );
-}
 
 export default function HomePage() {
   return (
@@ -46,14 +11,20 @@ export default function HomePage() {
       <header className="header">
         <div className="wrap headerInner">
           <Link href="/" className="brand" aria-label="Vexta home">
-            <LogoMark />
+            <span className="logoMark" aria-hidden="true" />
             <span className="brandName">Vexta</span>
           </Link>
 
           <nav className="nav" aria-label="Primary navigation">
-            <a href="#features">Features</a>
-            <Link href="/pricing">Pricing</Link>
-            <a href="#about">About</a>
+            <a href="#features" className="navLink">
+              Features
+            </a>
+            <Link href="/pricing" className="navLink">
+              Pricing
+            </Link>
+            <a href="#about" className="navLink">
+              About
+            </a>
           </nav>
 
           <div className="headerActions">
@@ -93,19 +64,19 @@ export default function HomePage() {
 
           <div className="bullets" aria-label="Key benefits">
             <div className="bullet">
-              <span className="check">
+              <span className="check" aria-hidden="true">
                 <CheckIcon />
               </span>
               Contact profiles that act like a hub (deals/notes/tasks/events).
             </div>
             <div className="bullet">
-              <span className="check">
+              <span className="check" aria-hidden="true">
                 <CheckIcon />
               </span>
               Deal pages with task buckets + event visibility.
             </div>
             <div className="bullet">
-              <span className="check">
+              <span className="check" aria-hidden="true">
                 <CheckIcon />
               </span>
               Fast filters designed for daily execution.
@@ -127,7 +98,7 @@ export default function HomePage() {
               <div className="card">
                 <div className="kicker">Next follow-up</div>
                 <div className="cardTitle">Call: Buyer pre-approval</div>
-                <div className="cardMeta">Linked to: John D • Deal: Bridgeview Ranch</div>
+                <div className="cardMeta">Linked to: John D • Deal: Active Buyer</div>
               </div>
 
               <div className="card">
@@ -167,35 +138,41 @@ export default function HomePage() {
           <p className="p2">Built around speed, linking records, and keeping the next action obvious.</p>
 
           <div className="grid3">
-            <FeatureCard
-              title="Contact Profile Hub"
-              desc="Deals, notes, tasks, calendar events — in one place with smart filtering."
-            />
-            <FeatureCard
-              title="Deal Pages that Pop"
-              desc="Stats + task buckets + upcoming events so you can run the deal."
-            />
-            <FeatureCard
-              title="Tasks & Calendar That Connect"
-              desc="Filter by contact, link/unlink, and keep the day organized."
-            />
-            <FeatureCard
-              title="Fast Filters"
-              desc="Search + status + due date filters designed for daily use."
-            />
-            <FeatureCard
-              title="Clean UI"
-              desc="No bloat. Just the actions you use constantly, done well."
-            />
-            <FeatureCard
-              title="Secure Foundation"
-              desc="Supabase auth + dashboard protection + Google OAuth."
-            />
+            {[
+              {
+                title: "Contact Profile Hub",
+                desc: "Deals, notes, tasks, calendar events — in one place with smart filtering.",
+              },
+              {
+                title: "Deal Pages that Pop",
+                desc: "Stats + task buckets + upcoming events so you can run the deal.",
+              },
+              {
+                title: "Tasks & Calendar That Connect",
+                desc: "Filter by contact, link/unlink, and keep the day organized.",
+              },
+              {
+                title: "Fast Filters",
+                desc: "Search + status + due date filters designed for daily use.",
+              },
+              {
+                title: "Clean UI",
+                desc: "No bloat. Just the actions you use constantly, done well.",
+              },
+              {
+                title: "Secure Foundation",
+                desc: "Supabase auth + dashboard protection + Google OAuth.",
+              },
+            ].map((f) => (
+              <div key={f.title} className="feature">
+                <div className="featureTitle">{f.title}</div>
+                <div className="featureDesc">{f.desc}</div>
+              </div>
+            ))}
           </div>
         </div>
       </section>
 
-      {/* ✅ Pricing stays a separate page */}
       <section className="section">
         <div className="wrap">
           <h2 className="h2">Simple yearly pricing</h2>
@@ -207,9 +184,7 @@ export default function HomePage() {
             <div className="pricingBox">
               <div className="pricingLabel">Yearly plan</div>
               <div className="pricingTitle">Everything you need to run your pipeline</div>
-              <div className="pricingMeta">
-                Contacts • Deals • Tasks • Notes • Calendar • Filters
-              </div>
+              <div className="pricingMeta">Contacts • Deals • Tasks • Notes • Calendar • Filters</div>
             </div>
 
             <div className="pricingActions">
@@ -228,8 +203,8 @@ export default function HomePage() {
         <div className="wrap">
           <h2 className="h2">About Vexta</h2>
           <p className="p2">
-            Vexta is built to be practical: help agents follow up faster, keep deals clean, and reduce chaos.
-            The goal is simple — more action, more results, less clutter.
+            Vexta is built to be practical: help agents follow up faster, keep deals clean, and reduce
+            chaos. The goal is simple — more action, more results, less clutter.
           </p>
 
           <div className="cta">
@@ -264,9 +239,8 @@ export default function HomePage() {
           position: fixed;
           inset: 0;
           z-index: -1;
-          background:
-            radial-gradient(1100px circle at 20% 10%, rgba(255, 255, 255, 0.12), transparent 60%),
-            radial-gradient(900px circle at 80% 30%, rgba(255, 255, 255, 0.10), transparent 55%),
+          background: radial-gradient(1100px circle at 20% 10%, rgba(255, 255, 255, 0.12), transparent 60%),
+            radial-gradient(900px circle at 80% 30%, rgba(255, 255, 255, 0.1), transparent 55%),
             linear-gradient(to bottom, #0a0a0a, #000);
         }
         .wrap {
@@ -280,7 +254,7 @@ export default function HomePage() {
           position: sticky;
           top: 0;
           z-index: 50;
-          border-bottom: 1px solid rgba(255, 255, 255, 0.10);
+          border-bottom: 1px solid rgba(255, 255, 255, 0.1);
           background: rgba(10, 10, 10, 0.75);
           backdrop-filter: blur(10px);
         }
@@ -291,6 +265,7 @@ export default function HomePage() {
           padding: 14px 0;
           gap: 12px;
         }
+
         .brand {
           display: inline-flex;
           align-items: center;
@@ -298,8 +273,6 @@ export default function HomePage() {
           text-decoration: none;
           color: #fff;
         }
-
-        /* ✅ Your logo */
         .logoMark {
           width: 36px;
           height: 36px;
@@ -311,10 +284,9 @@ export default function HomePage() {
           background-position: center;
           background-size: contain;
         }
-
         .brandName {
           font-size: 18px;
-          font-weight: 800;
+          font-weight: 900;
           letter-spacing: -0.4px;
         }
 
@@ -323,13 +295,13 @@ export default function HomePage() {
           gap: 18px;
           align-items: center;
         }
-        .nav :global(a) {
+        .navLink {
           color: rgba(255, 255, 255, 0.75);
           text-decoration: none;
           font-size: 14px;
           font-weight: 650;
         }
-        .nav :global(a:hover) {
+        .navLink:hover {
           color: #fff;
         }
 
@@ -356,7 +328,7 @@ export default function HomePage() {
           border: 1px solid rgba(255, 255, 255, 0.14);
           background: rgba(255, 255, 255, 0.06);
           font-size: 12px;
-          font-weight: 750;
+          font-weight: 800;
           color: rgba(255, 255, 255, 0.85);
         }
         .dot {
@@ -370,10 +342,10 @@ export default function HomePage() {
           font-size: 40px;
           line-height: 1.05;
           letter-spacing: -1.1px;
-          font-weight: 900;
+          font-weight: 950;
         }
         .muted {
-          color: rgba(255, 255, 255, 0.70);
+          color: rgba(255, 255, 255, 0.7);
         }
         .p {
           margin: 14px 0 0;
@@ -388,6 +360,7 @@ export default function HomePage() {
           gap: 12px;
           flex-wrap: wrap;
         }
+
         .bullets {
           margin-top: 18px;
           display: grid;
@@ -413,14 +386,11 @@ export default function HomePage() {
           flex: 0 0 auto;
         }
 
-        .heroRight {
-          width: 100%;
-        }
         .panel {
           border-radius: 18px;
-          border: 1px solid rgba(255, 255, 255, 0.10);
+          border: 1px solid rgba(255, 255, 255, 0.1);
           background: rgba(255, 255, 255, 0.06);
-          box-shadow: 0 30px 120px rgba(0,0,0,0.55);
+          box-shadow: 0 30px 120px rgba(0, 0, 0, 0.55);
           padding: 16px;
         }
         .panelTop {
@@ -431,23 +401,24 @@ export default function HomePage() {
         }
         .kicker {
           font-size: 12px;
-          color: rgba(255, 255, 255, 0.60);
+          color: rgba(255, 255, 255, 0.6);
         }
         .panelTitle {
           font-size: 18px;
-          font-weight: 850;
+          font-weight: 900;
           letter-spacing: -0.4px;
           margin-top: 4px;
         }
         .badge {
           font-size: 12px;
-          color: rgba(255, 255, 255, 0.70);
-          border: 1px solid rgba(255, 255, 255, 0.10);
+          color: rgba(255, 255, 255, 0.7);
+          border: 1px solid rgba(255, 255, 255, 0.1);
           background: rgba(0, 0, 0, 0.25);
           padding: 6px 10px;
           border-radius: 999px;
           white-space: nowrap;
         }
+
         .cards {
           margin-top: 14px;
           display: grid;
@@ -455,19 +426,19 @@ export default function HomePage() {
         }
         .card {
           border-radius: 14px;
-          border: 1px solid rgba(255, 255, 255, 0.10);
+          border: 1px solid rgba(255, 255, 255, 0.1);
           background: rgba(0, 0, 0, 0.25);
           padding: 12px;
         }
         .cardTitle {
           margin-top: 6px;
-          font-weight: 850;
+          font-weight: 900;
           letter-spacing: -0.2px;
         }
         .cardMeta {
           margin-top: 6px;
           font-size: 12px;
-          color: rgba(255, 255, 255, 0.60);
+          color: rgba(255, 255, 255, 0.6);
           line-height: 1.4;
         }
 
@@ -480,23 +451,23 @@ export default function HomePage() {
         }
         .mini {
           border-radius: 14px;
-          border: 1px solid rgba(255, 255, 255, 0.10);
+          border: 1px solid rgba(255, 255, 255, 0.1);
           background: rgba(0, 0, 0, 0.25);
           padding: 10px;
         }
         .miniTitle {
-          font-weight: 850;
+          font-weight: 900;
           color: #fff;
         }
         .miniSub {
           margin-top: 4px;
           font-size: 12px;
-          color: rgba(255, 255, 255, 0.60);
+          color: rgba(255, 255, 255, 0.6);
         }
 
         .section {
           padding: 56px 0;
-          border-top: 1px solid rgba(255, 255, 255, 0.10);
+          border-top: 1px solid rgba(255, 255, 255, 0.1);
         }
         .sectionAlt {
           background: rgba(0, 0, 0, 0.15);
@@ -504,7 +475,7 @@ export default function HomePage() {
         .h2 {
           margin: 0;
           font-size: 28px;
-          font-weight: 900;
+          font-weight: 950;
           letter-spacing: -0.6px;
         }
         .p2 {
@@ -522,17 +493,17 @@ export default function HomePage() {
         }
         .feature {
           border-radius: 18px;
-          border: 1px solid rgba(255, 255, 255, 0.10);
+          border: 1px solid rgba(255, 255, 255, 0.1);
           background: rgba(255, 255, 255, 0.06);
           padding: 16px;
         }
         .featureTitle {
-          font-weight: 900;
+          font-weight: 950;
           letter-spacing: -0.3px;
         }
         .featureDesc {
           margin-top: 8px;
-          color: rgba(255, 255, 255, 0.70);
+          color: rgba(255, 255, 255, 0.7);
           line-height: 1.5;
           font-size: 14px;
         }
@@ -542,29 +513,29 @@ export default function HomePage() {
           display: grid;
           gap: 14px;
           border-radius: 18px;
-          border: 1px solid rgba(255, 255, 255, 0.10);
+          border: 1px solid rgba(255, 255, 255, 0.1);
           background: rgba(255, 255, 255, 0.06);
           padding: 16px;
         }
         .pricingBox {
           border-radius: 14px;
-          border: 1px solid rgba(255, 255, 255, 0.10);
+          border: 1px solid rgba(255, 255, 255, 0.1);
           background: rgba(0, 0, 0, 0.25);
           padding: 14px;
         }
         .pricingLabel {
           font-size: 12px;
-          color: rgba(255, 255, 255, 0.60);
+          color: rgba(255, 255, 255, 0.6);
         }
         .pricingTitle {
           margin-top: 6px;
-          font-weight: 900;
+          font-weight: 950;
           letter-spacing: -0.2px;
         }
         .pricingMeta {
           margin-top: 6px;
           font-size: 12px;
-          color: rgba(255, 255, 255, 0.60);
+          color: rgba(255, 255, 255, 0.6);
           line-height: 1.4;
         }
         .pricingActions {
@@ -575,7 +546,7 @@ export default function HomePage() {
         }
 
         .footer {
-          border-top: 1px solid rgba(255, 255, 255, 0.10);
+          border-top: 1px solid rgba(255, 255, 255, 0.1);
           padding: 28px 0;
         }
         .footerInner {
@@ -586,7 +557,7 @@ export default function HomePage() {
           flex-wrap: wrap;
         }
         .footerText {
-          color: rgba(255, 255, 255, 0.60);
+          color: rgba(255, 255, 255, 0.6);
           font-size: 13px;
         }
         .footerLinks {
@@ -595,9 +566,9 @@ export default function HomePage() {
           font-size: 13px;
         }
         .footerLinks :global(a) {
-          color: rgba(255, 255, 255, 0.60);
+          color: rgba(255, 255, 255, 0.6);
           text-decoration: none;
-          font-weight: 750;
+          font-weight: 800;
         }
         .footerLinks :global(a:hover) {
           color: #fff;
@@ -610,7 +581,7 @@ export default function HomePage() {
           gap: 8px;
           padding: 10px 14px;
           border-radius: 12px;
-          font-weight: 850;
+          font-weight: 900;
           font-size: 14px;
           text-decoration: none;
           cursor: pointer;
@@ -637,7 +608,7 @@ export default function HomePage() {
           border: 1px solid rgba(255, 255, 255, 0.14);
         }
         .btnGhost:hover {
-          background: rgba(255, 255, 255, 0.10);
+          background: rgba(255, 255, 255, 0.1);
         }
 
         @media (min-width: 860px) {
@@ -665,5 +636,19 @@ export default function HomePage() {
         }
       `}</style>
     </main>
+  );
+}
+
+function CheckIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" aria-hidden="true">
+      <path
+        d="M20 6L9 17l-5-5"
+        stroke="currentColor"
+        strokeWidth="2.2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
   );
 }
