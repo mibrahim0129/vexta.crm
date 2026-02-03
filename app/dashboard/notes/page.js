@@ -25,9 +25,12 @@ export default function NotesPage() {
   const sb = useMemo(() => supabaseBrowser(), []);
   const mountedRef = useRef(false);
 
+  // ✅ Beta Mode toggle
+  const isBeta = process.env.NEXT_PUBLIC_BETA_MODE === "true";
+
   // ✅ Subscription (soft gating)
   const { loading: subLoading, access, plan } = useSubscription();
-  const canWrite = !subLoading && !!access;
+  const canWrite = isBeta ? true : !subLoading && !!access;
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -50,6 +53,10 @@ export default function NotesPage() {
     body: "",
   });
 
+  // ✅ Edit modal
+  const [editing, setEditing] = useState(null); // note row
+  const [editForm, setEditForm] = useState({ body: "", deal_id: "" });
+
   async function requireSession() {
     const { data } = await sb.auth.getSession();
     if (!data?.session) {
@@ -59,10 +66,24 @@ export default function NotesPage() {
     return data.session;
   }
 
+  function requireWriteOrWarn(message) {
+    if (isBeta) return true;
+
+    if (subLoading) {
+      setErr("Checking your plan… please try again.");
+      return false;
+    }
+    if (!canWrite) {
+      setErr(message || "Upgrade required.");
+      return false;
+    }
+    return true;
+  }
+
   async function loadContacts() {
     const { data, error } = await sb
       .from("contacts")
-      .select("id, first_name, last_name")
+      .select("id, first_name, last_name, created_at")
       .order("created_at", { ascending: false });
 
     if (error) throw error;
@@ -71,9 +92,10 @@ export default function NotesPage() {
     setContacts(list);
 
     // default selected contact for form
-    if (!form.contact_id && list.length > 0) {
-      setForm((p) => ({ ...p, contact_id: list[0].id }));
-    }
+    setForm((p) => {
+      if (p.contact_id) return p;
+      return list.length > 0 ? { ...p, contact_id: list[0].id } : p;
+    });
   }
 
   async function loadDeals(contactIdForDeals) {
@@ -105,6 +127,7 @@ export default function NotesPage() {
           `
           id,
           body,
+          user_id,
           contact_id,
           deal_id,
           created_at,
@@ -151,26 +174,11 @@ export default function NotesPage() {
     e.preventDefault();
     setErr("");
 
-    if (subLoading) {
-      setErr("Checking your plan… please try again.");
-      return;
-    }
-
-    // ✅ Soft gating: block create, but still allow viewing
-    if (!canWrite) {
-      setErr("Upgrade required to add new notes.");
-      return;
-    }
+    if (!requireWriteOrWarn("Upgrade required to add new notes.")) return;
 
     const body = (form.body || "").trim();
-    if (!body) {
-      setErr("Note can’t be empty.");
-      return;
-    }
-    if (!form.contact_id) {
-      setErr("Please select a contact.");
-      return;
-    }
+    if (!body) return setErr("Note can’t be empty.");
+    if (!form.contact_id) return setErr("Please select a contact.");
 
     setSaving(true);
     try {
@@ -193,6 +201,7 @@ export default function NotesPage() {
           `
           id,
           body,
+          user_id,
           contact_id,
           deal_id,
           created_at,
@@ -214,17 +223,82 @@ export default function NotesPage() {
     }
   }
 
+  // ✅ RLS-safe update helper
+  async function updateNote(noteId, patch) {
+    const session = await requireSession();
+    if (!session) return null;
+
+    const { data, error } = await sb
+      .from("notes")
+      .update(patch)
+      .eq("id", noteId)
+      .eq("user_id", session.user.id) // ✅ critical for RLS
+      .select(
+        `
+        id,
+        body,
+        user_id,
+        contact_id,
+        deal_id,
+        created_at,
+        contacts:contact_id ( id, first_name, last_name ),
+        deals:deal_id ( id, title )
+      `
+      )
+      .single();
+
+    if (error) throw error;
+    return data;
+  }
+
+  function openEdit(n) {
+    setErr("");
+    setEditing(n);
+    setEditForm({
+      body: n.body || "",
+      deal_id: n.deal_id || "",
+    });
+  }
+
+  function closeEdit() {
+    if (saving) return;
+    setEditing(null);
+    setEditForm({ body: "", deal_id: "" });
+  }
+
+  async function saveEdit() {
+    setErr("");
+    if (!editing) return;
+
+    if (!requireWriteOrWarn("Upgrade required to edit notes.")) return;
+
+    const body = (editForm.body || "").trim();
+    if (!body) return setErr("Note can’t be empty.");
+
+    setSaving(true);
+    try {
+      const patch = {
+        body,
+        deal_id: editForm.deal_id ? editForm.deal_id : null,
+      };
+
+      const updated = await updateNote(editing.id, patch);
+      if (!updated) return;
+
+      setNotes((prev) => prev.map((x) => (x.id === editing.id ? updated : x)));
+      closeEdit();
+    } catch (e) {
+      console.error(e);
+      setErr(e?.message || "Failed to update note");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function deleteNote(noteId) {
     setErr("");
 
-    if (subLoading) {
-      setErr("Checking your plan… please try again.");
-      return;
-    }
-    if (!canWrite) {
-      setErr("Upgrade required to delete notes.");
-      return;
-    }
+    if (!requireWriteOrWarn("Upgrade required to delete notes.")) return;
 
     const ok = confirm("Delete this note?");
     if (!ok) return;
@@ -233,7 +307,7 @@ export default function NotesPage() {
       const session = await requireSession();
       if (!session) return;
 
-      const { error } = await sb.from("notes").delete().eq("id", noteId);
+      const { error } = await sb.from("notes").delete().eq("id", noteId).eq("user_id", session.user.id);
       if (error) throw error;
 
       setNotes((prev) => prev.filter((n) => n.id !== noteId));
@@ -265,10 +339,12 @@ export default function NotesPage() {
   useEffect(() => {
     mountedRef.current = true;
 
+    let channel;
+
     (async () => {
       await loadAll();
 
-      const channel = sb.channel("notes-rt");
+      channel = sb.channel("notes-rt");
       channel
         .on("postgres_changes", { event: "*", schema: "public", table: "notes" }, () => {
           if (mountedRef.current) loadNotes();
@@ -280,12 +356,12 @@ export default function NotesPage() {
           if (mountedRef.current) loadAll();
         })
         .subscribe((status) => setRtStatus(String(status || "").toLowerCase()));
-
-      return () => {
-        mountedRef.current = false;
-        sb.removeChannel(channel);
-      };
     })();
+
+    return () => {
+      mountedRef.current = false;
+      if (channel) sb.removeChannel(channel);
+    };
 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -310,7 +386,9 @@ export default function NotesPage() {
           <div style={styles.titleRow}>
             <h1 style={styles.h1}>Notes</h1>
             <span style={styles.pill}>Realtime: {rtStatus}</span>
-            <span style={styles.pillMuted}>{subLoading ? "Checking plan…" : `Plan: ${plan || "Free"}`}</span>
+            <span style={styles.pillMuted}>
+              {isBeta ? "Beta Mode" : subLoading ? "Checking plan…" : `Plan: ${plan || "Free"}`}
+            </span>
             <span style={styles.pillMuted}>{loading ? "Loading…" : `${shownNotes.length} shown`}</span>
           </div>
           <p style={styles.sub}>Your activity log across contacts and deals.</p>
@@ -323,12 +401,12 @@ export default function NotesPage() {
         </div>
       </div>
 
-      {/* ✅ Upgrade banner */}
-      {!subLoading && !access ? (
+      {/* ✅ Upgrade banner (disabled in beta) */}
+      {!isBeta && !subLoading && !access ? (
         <div style={{ marginTop: 14 }}>
           <UpgradeBanner
             title="Upgrade to add notes"
-            body="You can view your existing notes, but adding or deleting notes requires an active plan."
+            body="You can view your existing notes, but adding, editing, or deleting notes requires an active plan."
           />
         </div>
       ) : null}
@@ -368,7 +446,7 @@ export default function NotesPage() {
                 .
               </>
             ) : disableWrites ? (
-              "Writes are disabled until upgrade."
+              isBeta ? "Beta mode enabled." : "Writes are disabled until upgrade."
             ) : (
               "Attach a note to a contact (and optionally a deal)."
             )}
@@ -435,12 +513,10 @@ export default function NotesPage() {
                   : {}),
               }}
             >
-              {subLoading ? "Checking plan…" : saving ? "Saving..." : "Add Note"}
+              {isBeta ? (saving ? "Saving..." : "Add Note") : subLoading ? "Checking plan…" : saving ? "Saving..." : "Add Note"}
             </button>
 
-            <div style={{ fontSize: 12, opacity: 0.7 }}>
-              Tip: Use notes as your running log — you’ll close faster.
-            </div>
+            <div style={{ fontSize: 12, opacity: 0.7 }}>Tip: Use notes as your running log — you’ll close faster.</div>
           </div>
         </form>
       </div>
@@ -449,9 +525,7 @@ export default function NotesPage() {
       <div style={{ marginTop: 18 }}>
         <div style={styles.listHeader}>
           <h2 style={styles.h2}>Notes</h2>
-          <div style={{ opacity: 0.75, fontWeight: 900, fontSize: 13 }}>
-            {loading ? "Loading…" : `${notes.length} total`}
-          </div>
+          <div style={{ opacity: 0.75, fontWeight: 900, fontSize: 13 }}>{loading ? "Loading…" : `${notes.length} total`}</div>
         </div>
 
         {loading ? (
@@ -459,9 +533,7 @@ export default function NotesPage() {
         ) : shownNotes.length === 0 ? (
           <div style={styles.empty}>
             <div style={{ fontWeight: 950, fontSize: 14 }}>No notes found</div>
-            <div style={{ opacity: 0.75, marginTop: 6 }}>
-              Try clearing your search/filter, or add your first note above.
-            </div>
+            <div style={{ opacity: 0.75, marginTop: 6 }}>Try clearing your search/filter, or add your first note above.</div>
           </div>
         ) : (
           <div style={styles.listGrid}>
@@ -494,6 +566,20 @@ export default function NotesPage() {
 
                     <div style={styles.noteRight}>
                       <span style={styles.time}>{fmtDate(n.created_at)}</span>
+
+                      <button
+                        onClick={() => openEdit(n)}
+                        style={{
+                          ...styles.btnMini,
+                          ...(disableWrites ? { opacity: 0.55, cursor: "not-allowed" } : {}),
+                        }}
+                        disabled={disableWrites}
+                        type="button"
+                        title={disableWrites ? (isBeta ? "Edit note" : "Upgrade required") : "Edit note"}
+                      >
+                        Edit
+                      </button>
+
                       <button
                         onClick={() => deleteNote(n.id)}
                         style={{
@@ -503,7 +589,7 @@ export default function NotesPage() {
                         }}
                         disabled={disableWrites}
                         type="button"
-                        title={disableWrites ? "Upgrade required" : "Delete note"}
+                        title={disableWrites ? (isBeta ? "Delete note" : "Upgrade required") : "Delete note"}
                       >
                         Delete
                       </button>
@@ -517,6 +603,63 @@ export default function NotesPage() {
           </div>
         )}
       </div>
+
+      {/* ✅ Edit modal */}
+      {editing ? (
+        <div style={styles.modalOverlay} onMouseDown={closeEdit}>
+          <div style={styles.modal} onMouseDown={(e) => e.stopPropagation()}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" }}>
+              <div style={{ fontWeight: 950, fontSize: 18 }}>Edit Note</div>
+              <button onClick={closeEdit} type="button" style={styles.btnGhost} disabled={saving}>
+                Close
+              </button>
+            </div>
+
+            <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
+              <div style={{ fontSize: 12, opacity: 0.85, fontWeight: 900 }}>
+                Contact:{" "}
+                <span style={{ opacity: 0.9 }}>
+                  {editing.contact_id ? safeName(editing.contacts) : "Unknown"}
+                </span>
+              </div>
+
+              <select
+                value={editForm.deal_id}
+                onChange={(e) => setEditForm((p) => ({ ...p, deal_id: e.target.value }))}
+                style={styles.select}
+                disabled={saving}
+              >
+                <option value="">No deal (optional)</option>
+                {deals
+                  .filter((d) => (editing?.contact_id ? d.contact_id === editing.contact_id : true))
+                  .map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.title}
+                    </option>
+                  ))}
+              </select>
+
+              <textarea
+                value={editForm.body}
+                onChange={(e) => setEditForm((p) => ({ ...p, body: e.target.value }))}
+                placeholder="Update your note…"
+                style={styles.textarea}
+                rows={6}
+                disabled={saving}
+              />
+
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 6 }}>
+                <button onClick={closeEdit} type="button" style={styles.btnGhost} disabled={saving}>
+                  Cancel
+                </button>
+                <button onClick={saveEdit} type="button" style={styles.btnPrimary} disabled={saving}>
+                  {saving ? "Saving..." : "Save Changes"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -715,4 +858,22 @@ const styles = {
   },
 
   body: { marginTop: 12, whiteSpace: "pre-wrap", lineHeight: 1.55, opacity: 0.95 },
+
+  modalOverlay: {
+    position: "fixed",
+    inset: 0,
+    background: "rgba(0,0,0,0.45)",
+    display: "grid",
+    placeItems: "center",
+    padding: 14,
+    zIndex: 50,
+  },
+  modal: {
+    width: "100%",
+    maxWidth: 760,
+    background: "#0f0f0f",
+    border: "1px solid rgba(255,255,255,0.12)",
+    borderRadius: 16,
+    padding: 16,
+  },
 };
