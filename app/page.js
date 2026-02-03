@@ -4,7 +4,7 @@ import Link from "next/link";
 export const metadata = {
   title: "Vexta CRM — Real Estate CRM",
   description:
-    "Vexta CRM helps real estate agents manage contacts, deals, tasks, notes, and calendar events in one place.",
+    "Vexta CRM helps real estate agents manage contacts, deals, tasks, notes, and calendar events in one clean dashboard.",
 };
 
 function CheckIcon() {
@@ -21,10 +21,19 @@ function CheckIcon() {
   );
 }
 
-// ✅ Server-safe logo (no onError / no handlers)
+// ✅ Server-safe logo (no handlers)
 // Put your file at: /public/VLT.png
 function LogoMark() {
   return <span className="logoMark" aria-hidden="true" />;
+}
+
+function FeatureCard({ title, desc }) {
+  return (
+    <div className="feature">
+      <div className="featureTitle">{title}</div>
+      <div className="featureDesc">{desc}</div>
+    </div>
+  );
 }
 
 export default function HomePage() {
@@ -34,14 +43,14 @@ export default function HomePage() {
 
       <header className="header">
         <div className="wrap headerInner">
-          <Link href="/" className="brand">
+          <Link href="/" className="brand" aria-label="Vexta home">
             <LogoMark />
             <span className="brandName">Vexta</span>
           </Link>
 
-          <nav className="nav">
+          <nav className="nav" aria-label="Primary navigation">
             <a href="#features">Features</a>
-            <a href="#pricing">Pricing</a>
+            <Link href="/pricing">Pricing</Link>
             <a href="#about">About</a>
           </nav>
 
@@ -50,7 +59,7 @@ export default function HomePage() {
               Log in
             </Link>
             <Link href="/signup" className="btn btnPrimary">
-              Get started
+              Sign up
             </Link>
           </div>
         </div>
@@ -63,24 +72,24 @@ export default function HomePage() {
           </div>
 
           <h1 className="h1">
-            Your CRM that actually <span className="muted">keeps you moving</span>.
+            The CRM built for agents who want <span className="muted">simplicity</span>.
           </h1>
 
           <p className="p">
-            Vexta CRM keeps contacts, deals, tasks, notes, and calendar events connected — so you always know the next
-            follow-up and what matters today.
+            Vexta keeps contacts, deals, tasks, notes, and calendar events connected — so you always
+            know the next follow-up and what matters today.
           </p>
 
           <div className="cta">
             <Link href="/signup" className="btn btnPrimary btnLg">
-              Create account
+              Sign up
             </Link>
             <Link href="/login" className="btn btnGhost btnLg">
               Log in
             </Link>
           </div>
 
-          <div className="bullets">
+          <div className="bullets" aria-label="Key benefits">
             <div className="bullet">
               <span className="check">
                 <CheckIcon />
@@ -102,7 +111,7 @@ export default function HomePage() {
           </div>
         </div>
 
-        <div className="heroRight">
+        <div className="heroRight" aria-label="Product preview">
           <div className="panel">
             <div className="panelTop">
               <div>
@@ -156,118 +165,60 @@ export default function HomePage() {
           <p className="p2">Built around speed, linking records, and keeping the next action obvious.</p>
 
           <div className="grid3">
-            {[
-              {
-                title: "Contact Profile Hub",
-                desc: "Deals, notes, tasks, calendar events — in one place with smart filtering.",
-              },
-              {
-                title: "Deal Pages that Pop",
-                desc: "Stats + task buckets + upcoming events so you can run the deal.",
-              },
-              {
-                title: "Tasks & Calendar That Connect",
-                desc: "Filter by contact, link/unlink, and keep the day organized.",
-              },
-              {
-                title: "Fast Filters",
-                desc: "Search + status + due date filters designed for daily use.",
-              },
-              {
-                title: "Clean UI",
-                desc: "No bloat. Just the actions you use constantly, done well.",
-              },
-              {
-                title: "Secure Foundation",
-                desc: "Supabase auth + dashboard protection + Google OAuth.",
-              },
-            ].map((f) => (
-              <div key={f.title} className="feature">
-                <div className="featureTitle">{f.title}</div>
-                <div className="featureDesc">{f.desc}</div>
-              </div>
-            ))}
+            <FeatureCard
+              title="Contact Profile Hub"
+              desc="Deals, notes, tasks, calendar events — in one place with smart filtering."
+            />
+            <FeatureCard
+              title="Deal Pages that Pop"
+              desc="Stats + task buckets + upcoming events so you can run the deal."
+            />
+            <FeatureCard
+              title="Tasks & Calendar That Connect"
+              desc="Filter by contact, link/unlink, and keep the day organized."
+            />
+            <FeatureCard
+              title="Fast Filters"
+              desc="Search + status + due date filters designed for daily use."
+            />
+            <FeatureCard
+              title="Clean UI"
+              desc="No bloat. Just the actions you use constantly, done well."
+            />
+            <FeatureCard
+              title="Secure Foundation"
+              desc="Supabase auth + dashboard protection + Google OAuth."
+            />
           </div>
         </div>
       </section>
 
-      <section id="pricing" className="section">
+      {/* ✅ Pricing stays a separate page */}
+      <section className="section">
         <div className="wrap">
-          <h2 className="h2">Pricing</h2>
-          <p className="p2">Simple tiers. Start free, upgrade when you’re ready.</p>
+          <h2 className="h2">Simple yearly pricing</h2>
+          <p className="p2">
+            One plan. Built for agents who want clarity, speed, and a CRM they’ll actually use.
+          </p>
 
-          <div className="grid3">
-            <div className="priceCard">
-              <div className="priceTop">
-                <div className="priceName">Starter</div>
-                <div className="price">$0</div>
-                <div className="priceSub">For getting set up</div>
+          <div className="pricingTeaser">
+            <div className="pricingBox">
+              <div className="pricingLabel">Yearly plan</div>
+              <div className="pricingTitle">Everything you need to run your pipeline</div>
+              <div className="pricingMeta">
+                Contacts • Deals • Tasks • Notes • Calendar • Filters
               </div>
-              <ul className="list">
-                <li>
-                  <CheckIcon /> Contacts, deals, notes
-                </li>
-                <li>
-                  <CheckIcon /> Tasks + calendar basics
-                </li>
-                <li>
-                  <CheckIcon /> Standard filters
-                </li>
-              </ul>
-              <Link href="/signup" className="btn btnPrimary btnFull">
-                Start free
-              </Link>
             </div>
 
-            <div className="priceCard priceFeatured">
-              <div className="priceTop">
-                <div className="priceName">Pro</div>
-                <div className="price">$29</div>
-                <div className="priceSub">Per month</div>
-              </div>
-              <ul className="list">
-                <li>
-                  <CheckIcon /> Everything in Starter
-                </li>
-                <li>
-                  <CheckIcon /> Advanced filters + reporting
-                </li>
-                <li>
-                  <CheckIcon /> Pipeline views
-                </li>
-                <li>
-                  <CheckIcon /> Priority improvements
-                </li>
-              </ul>
-              <Link href="/signup" className="btn btnDark btnFull">
-                Get Pro
+            <div className="pricingActions">
+              <Link href="/pricing" className="btn btnGhost btnLg">
+                View pricing
               </Link>
-            </div>
-
-            <div className="priceCard">
-              <div className="priceTop">
-                <div className="priceName">Team</div>
-                <div className="price">$79</div>
-                <div className="priceSub">Per month</div>
-              </div>
-              <ul className="list">
-                <li>
-                  <CheckIcon /> Shared pipeline options
-                </li>
-                <li>
-                  <CheckIcon /> Roles & permissions
-                </li>
-                <li>
-                  <CheckIcon /> Team reporting
-                </li>
-              </ul>
-              <Link href="/signup" className="btn btnGhost btnFull">
-                Start Team
+              <Link href="/signup" className="btn btnPrimary btnLg">
+                Sign up
               </Link>
             </div>
           </div>
-
-          <p className="finePrint">Pricing can be placeholders while you finish the product.</p>
         </div>
       </section>
 
@@ -275,13 +226,13 @@ export default function HomePage() {
         <div className="wrap">
           <h2 className="h2">About Vexta</h2>
           <p className="p2">
-            Vexta CRM is built to be practical: help agents follow up faster, keep deals clean, and reduce chaos. The
-            goal is simple — more action, more results, less clutter.
+            Vexta is built to be practical: help agents follow up faster, keep deals clean, and reduce chaos.
+            The goal is simple — more action, more results, less clutter.
           </p>
 
           <div className="cta">
             <Link href="/signup" className="btn btnPrimary btnLg">
-              Create account
+              Sign up
             </Link>
             <Link href="/login" className="btn btnGhost btnLg">
               Log in
@@ -294,13 +245,14 @@ export default function HomePage() {
         <div className="wrap footerInner">
           <div className="footerText">© {new Date().getFullYear()} Vexta CRM</div>
           <div className="footerLinks">
+            <Link href="/pricing">Pricing</Link>
             <Link href="/login">Log in</Link>
             <Link href="/signup">Sign up</Link>
           </div>
         </div>
       </footer>
 
-      <style js>{`
+      <style jsx>{`
         .page {
           min-height: 100vh;
           color: #fff;
@@ -345,7 +297,7 @@ export default function HomePage() {
           color: #fff;
         }
 
-        /* ✅ Your logo (no background / uses transparent PNG) */
+        /* ✅ Your logo */
         .logoMark {
           width: 36px;
           height: 36px;
@@ -363,19 +315,22 @@ export default function HomePage() {
           font-weight: 800;
           letter-spacing: -0.4px;
         }
+
         .nav {
           display: none;
           gap: 18px;
+          align-items: center;
         }
-        .nav a {
+        .nav :global(a) {
           color: rgba(255, 255, 255, 0.75);
           text-decoration: none;
           font-size: 14px;
           font-weight: 650;
         }
-        .nav a:hover {
+        .nav :global(a:hover) {
           color: #fff;
         }
+
         .headerActions {
           display: flex;
           gap: 10px;
@@ -556,6 +511,7 @@ export default function HomePage() {
           max-width: 720px;
           line-height: 1.55;
         }
+
         .grid3 {
           margin-top: 22px;
           display: grid;
@@ -579,55 +535,41 @@ export default function HomePage() {
           font-size: 14px;
         }
 
-        .priceCard {
+        .pricingTeaser {
+          margin-top: 18px;
+          display: grid;
+          gap: 14px;
           border-radius: 18px;
           border: 1px solid rgba(255, 255, 255, 0.10);
           background: rgba(255, 255, 255, 0.06);
           padding: 16px;
         }
-        .priceFeatured {
-          background: #fff;
-          color: #0a0a0a;
-          box-shadow: 0 30px 120px rgba(0,0,0,0.55);
+        .pricingBox {
+          border-radius: 14px;
+          border: 1px solid rgba(255, 255, 255, 0.10);
+          background: rgba(0, 0, 0, 0.25);
+          padding: 14px;
         }
-        .priceTop {
-          margin-bottom: 10px;
+        .pricingLabel {
+          font-size: 12px;
+          color: rgba(255, 255, 255, 0.60);
         }
-        .priceName {
+        .pricingTitle {
+          margin-top: 6px;
           font-weight: 900;
           letter-spacing: -0.2px;
         }
-        .price {
-          margin-top: 8px;
-          font-size: 34px;
-          font-weight: 950;
-          letter-spacing: -1px;
-        }
-        .priceSub {
+        .pricingMeta {
           margin-top: 6px;
-          font-size: 13px;
-          opacity: 0.75;
-        }
-        .list {
-          margin: 14px 0 16px;
-          padding: 0;
-          list-style: none;
-          display: grid;
-          gap: 10px;
-          font-size: 14px;
-          line-height: 1.45;
-          color: inherit;
-        }
-        .list li {
-          display: flex;
-          align-items: flex-start;
-          gap: 10px;
-          opacity: 0.85;
-        }
-        .finePrint {
-          margin-top: 12px;
           font-size: 12px;
-          color: rgba(255, 255, 255, 0.50);
+          color: rgba(255, 255, 255, 0.60);
+          line-height: 1.4;
+        }
+        .pricingActions {
+          display: flex;
+          gap: 12px;
+          flex-wrap: wrap;
+          justify-content: flex-start;
         }
 
         .footer {
@@ -650,12 +592,12 @@ export default function HomePage() {
           gap: 14px;
           font-size: 13px;
         }
-        .footerLinks a {
+        .footerLinks :global(a) {
           color: rgba(255, 255, 255, 0.60);
           text-decoration: none;
           font-weight: 750;
         }
-        .footerLinks a:hover {
+        .footerLinks :global(a:hover) {
           color: #fff;
         }
 
@@ -679,9 +621,6 @@ export default function HomePage() {
         .btnLg {
           padding: 12px 16px;
         }
-        .btnFull {
-          width: 100%;
-        }
         .btnPrimary {
           background: #fff;
           color: #0a0a0a;
@@ -698,14 +637,6 @@ export default function HomePage() {
         .btnGhost:hover {
           background: rgba(255, 255, 255, 0.10);
         }
-        .btnDark {
-          background: #0a0a0a;
-          color: #fff;
-          border: 1px solid rgba(0, 0, 0, 0.25);
-        }
-        .btnDark:hover {
-          background: #121212;
-        }
 
         @media (min-width: 860px) {
           .nav {
@@ -721,6 +652,13 @@ export default function HomePage() {
           }
           .grid3 {
             grid-template-columns: repeat(3, 1fr);
+          }
+          .pricingTeaser {
+            grid-template-columns: 1.3fr 0.7fr;
+            align-items: center;
+          }
+          .pricingActions {
+            justify-content: flex-end;
           }
         }
       `}</style>
