@@ -12,7 +12,7 @@ export default function CalendarPage() {
   const sb = useMemo(() => supabaseBrowser(), []);
   const mountedRef = useRef(false);
 
-  // ✅ Beta Mode toggle (no helpers)
+  // ✅ Beta Mode toggle
   const isBeta = process.env.NEXT_PUBLIC_BETA_MODE === "true";
 
   // ✅ Subscription (soft gating)
@@ -59,17 +59,16 @@ export default function CalendarPage() {
     notes: "",
   });
 
-  async function requireSession() {
+  async function requireSession(next = "/dashboard/calendar") {
     const { data } = await sb.auth.getSession();
     if (!data?.session) {
-      window.location.href = "/login?next=/dashboard/calendar";
+      window.location.href = `/login?next=${encodeURIComponent(next)}`;
       return null;
     }
     return data.session;
   }
 
   function requireWriteOrWarn(message) {
-    // ✅ Beta: always allow
     if (isBeta) return true;
 
     if (subLoading) {
@@ -168,10 +167,11 @@ export default function CalendarPage() {
     return Number.isNaN(d.getTime()) ? null : d.toISOString();
   }
 
-  async function loadContacts() {
+  async function loadContactsWithSession(session) {
     const { data, error } = await sb
       .from("contacts")
-      .select("id, first_name, last_name, created_at")
+      .select("id, first_name, last_name, created_at, user_id")
+      .eq("user_id", session.user.id) // ✅ RLS-safe
       .order("created_at", { ascending: false });
 
     if (error) throw error;
@@ -185,8 +185,12 @@ export default function CalendarPage() {
     });
   }
 
-  async function loadDeals(contactIdForDeals) {
-    let q = sb.from("deals").select("id, title, contact_id, created_at").order("created_at", { ascending: false });
+  async function loadDealsWithSession(session, contactIdForDeals) {
+    let q = sb
+      .from("deals")
+      .select("id, title, contact_id, created_at, user_id")
+      .eq("user_id", session.user.id) // ✅ RLS-safe
+      .order("created_at", { ascending: false });
 
     if (contactIdForDeals && contactIdForDeals !== "all") {
       q = q.eq("contact_id", contactIdForDeals);
@@ -195,60 +199,61 @@ export default function CalendarPage() {
     const { data, error } = await q;
     if (error) throw error;
 
-    setDeals(Array.isArray(data) ? data : []);
+    const list = Array.isArray(data) ? data : [];
+    setDeals(list);
+
+    return list;
   }
 
-  async function loadEvents() {
-    const session = await requireSession();
-    if (!session) return;
+  async function loadEventsWithSession(session) {
+    const { data, error } = await sb
+      .from("calendar_events")
+      .select(
+        `
+          id,
+          user_id,
+          title,
+          location,
+          start_at,
+          end_at,
+          notes,
+          contact_id,
+          deal_id,
+          created_at,
+          updated_at,
+          contacts:contact_id ( id, first_name, last_name ),
+          deals:deal_id ( id, title )
+        `
+      )
+      .eq("user_id", session.user.id) // ✅ critical
+      .order("start_at", { ascending: true })
+      .limit(500);
 
-    setErr("");
-    setLoading(true);
-
-    try {
-      const { data, error } = await sb
-        .from("calendar_events")
-        .select(
-          `
-            id,
-            user_id,
-            title,
-            location,
-            start_at,
-            end_at,
-            notes,
-            contact_id,
-            deal_id,
-            created_at,
-            updated_at,
-            contacts:contact_id ( id, first_name, last_name ),
-            deals:deal_id ( id, title )
-          `
-        )
-        .order("start_at", { ascending: true });
-
-      if (error) throw error;
-
-      setEvents(Array.isArray(data) ? data : []);
-    } catch (e) {
-      console.error(e);
-      setErr(e?.message || "Failed to load events");
-      setEvents([]);
-    } finally {
-      setLoading(false);
-    }
+    if (error) throw error;
+    setEvents(Array.isArray(data) ? data : []);
   }
 
   async function loadAll() {
     setErr("");
     setLoading(true);
+
     try {
-      const session = await requireSession();
+      const session = await requireSession("/dashboard/calendar");
       if (!session) return;
 
-      await loadContacts();
-      await loadDeals(filterContactId === "all" ? form.contact_id : filterContactId);
-      await loadEvents();
+      await loadContactsWithSession(session);
+
+      // pick correct contact context for deals
+      const dealsContactId = filterContactId === "all" ? form.contact_id : filterContactId;
+      const dealsList = await loadDealsWithSession(session, dealsContactId);
+
+      // keep deal filter valid after deals list updates
+      if (filterDealId !== "all") {
+        const d = dealsList.find((x) => x.id === filterDealId);
+        if (!d) setFilterDealId("all");
+      }
+
+      await loadEventsWithSession(session);
     } catch (e) {
       console.error(e);
       setErr(e?.message || "Failed to load data");
@@ -276,7 +281,7 @@ export default function CalendarPage() {
 
     setSaving(true);
     try {
-      const session = await requireSession();
+      const session = await requireSession("/dashboard/calendar");
       if (!session) return;
 
       const payload = {
@@ -325,7 +330,7 @@ export default function CalendarPage() {
   }
 
   async function updateEvent(eventId, patch) {
-    const session = await requireSession();
+    const session = await requireSession("/dashboard/calendar");
     if (!session) return null;
 
     const { data, error } = await sb
@@ -394,7 +399,6 @@ export default function CalendarPage() {
 
     const start = new Date(startIso);
     const end = new Date(endIso);
-
     if (end.getTime() < start.getTime()) return setErr("End must be after start.");
 
     setSaving(true);
@@ -431,7 +435,7 @@ export default function CalendarPage() {
     if (!ok) return;
 
     try {
-      const session = await requireSession();
+      const session = await requireSession("/dashboard/calendar");
       if (!session) return;
 
       const { error } = await sb.from("calendar_events").delete().eq("id", eventId).eq("user_id", session.user.id);
@@ -444,14 +448,18 @@ export default function CalendarPage() {
     }
   }
 
-  // When filter contact changes, reload deals (keeps dropdown relevant)
+  // When filter contact changes, reload deals list for that contact (and fix deal filter)
   useEffect(() => {
     (async () => {
-      await loadDeals(filterContactId === "all" ? form.contact_id : filterContactId);
-      // Keep deal filter valid
-      if (filterDealId !== "all" && filterContactId !== "all") {
-        const d = deals.find((x) => x.id === filterDealId);
-        if (d && d.contact_id !== filterContactId) setFilterDealId("all");
+      const session = await requireSession("/dashboard/calendar");
+      if (!session) return;
+
+      const dealsContactId = filterContactId === "all" ? form.contact_id : filterContactId;
+      const list = await loadDealsWithSession(session, dealsContactId);
+
+      if (filterDealId !== "all") {
+        const d = list.find((x) => x.id === filterDealId);
+        if (!d) setFilterDealId("all");
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -460,12 +468,16 @@ export default function CalendarPage() {
   // When form.contact_id changes, refresh deals dropdown and clear deal selection if mismatch
   useEffect(() => {
     if (!form.contact_id) return;
+
     (async () => {
-      await loadDeals(form.contact_id);
+      const session = await requireSession("/dashboard/calendar");
+      if (!session) return;
+
+      const list = await loadDealsWithSession(session, form.contact_id);
 
       if (form.deal_id) {
-        const d = deals.find((x) => x.id === form.deal_id);
-        if (d && d.contact_id !== form.contact_id) {
+        const d = list.find((x) => x.id === form.deal_id);
+        if (!d || d.contact_id !== form.contact_id) {
           setForm((p) => ({ ...p, deal_id: "" }));
         }
       }
@@ -473,7 +485,7 @@ export default function CalendarPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form.contact_id]);
 
-  // Keep edit deal valid when edit contact changes
+  // Keep edit deal valid when edit contact changes (using current deals list)
   useEffect(() => {
     if (!editing) return;
     if (!editForm.contact_id) return;
@@ -490,7 +502,6 @@ export default function CalendarPage() {
 
   useEffect(() => {
     mountedRef.current = true;
-
     let channel;
 
     (async () => {
@@ -499,13 +510,13 @@ export default function CalendarPage() {
       channel = sb.channel("calendar-rt");
       channel
         .on("postgres_changes", { event: "*", schema: "public", table: "calendar_events" }, () => {
-          if (mountedRef.current) loadEvents();
+          if (mountedRef.current) loadAll();
         })
         .on("postgres_changes", { event: "*", schema: "public", table: "contacts" }, () => {
-          if (mountedRef.current) loadContacts();
+          if (mountedRef.current) loadAll();
         })
         .on("postgres_changes", { event: "*", schema: "public", table: "deals" }, () => {
-          if (mountedRef.current) loadDeals(filterContactId === "all" ? form.contact_id : filterContactId);
+          if (mountedRef.current) loadAll();
         })
         .subscribe((status) => setRtStatus(String(status || "").toLowerCase()));
     })();
@@ -591,7 +602,9 @@ export default function CalendarPage() {
       <div style={styles.card}>
         <div style={styles.cardTop}>
           <h2 style={styles.h2}>Add Event</h2>
-          {!isBeta && !subLoading && !access ? <div style={{ fontSize: 12, opacity: 0.8 }}>Writes are disabled until upgrade.</div> : null}
+          {!isBeta && !subLoading && !access ? (
+            <div style={{ fontSize: 12, opacity: 0.8 }}>Writes are disabled until upgrade.</div>
+          ) : null}
         </div>
 
         <form onSubmit={addEvent} style={styles.form}>
@@ -835,9 +848,7 @@ export default function CalendarPage() {
                                 }}
                                 type="button"
                                 disabled={disableWrites}
-                                title={
-                                  isBeta ? "Delete event" : subLoading ? "Checking plan…" : !canWrite ? "Upgrade required" : "Delete event"
-                                }
+                                title={isBeta ? "Delete event" : subLoading ? "Checking plan…" : !canWrite ? "Upgrade required" : "Delete event"}
                               >
                                 Delete
                               </button>
