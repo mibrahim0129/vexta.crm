@@ -47,6 +47,18 @@ export default function CalendarPage() {
     notes: "",
   });
 
+  // ✅ Edit modal
+  const [editing, setEditing] = useState(null); // event row
+  const [editForm, setEditForm] = useState({
+    contact_id: "",
+    deal_id: "",
+    title: "",
+    location: "",
+    start_at: "",
+    end_at: "",
+    notes: "",
+  });
+
   async function requireSession() {
     const { data } = await sb.auth.getSession();
     if (!data?.session) {
@@ -141,6 +153,21 @@ export default function CalendarPage() {
     return `${s.toLocaleString()} → ${e.toLocaleString()}`;
   }
 
+  // datetime-local helpers
+  function localInputFromIso(iso) {
+    if (!iso) return "";
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return "";
+    const pad = (n) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }
+
+  function isoFromLocalInput(v) {
+    if (!v) return null;
+    const d = new Date(v);
+    return Number.isNaN(d.getTime()) ? null : d.toISOString();
+  }
+
   async function loadContacts() {
     const { data, error } = await sb
       .from("contacts")
@@ -184,6 +211,7 @@ export default function CalendarPage() {
         .select(
           `
             id,
+            user_id,
             title,
             location,
             start_at,
@@ -268,6 +296,7 @@ export default function CalendarPage() {
         .select(
           `
             id,
+            user_id,
             title,
             location,
             start_at,
@@ -295,6 +324,104 @@ export default function CalendarPage() {
     }
   }
 
+  async function updateEvent(eventId, patch) {
+    const session = await requireSession();
+    if (!session) return null;
+
+    const { data, error } = await sb
+      .from("calendar_events")
+      .update(patch)
+      .eq("id", eventId)
+      .eq("user_id", session.user.id) // ✅ critical for RLS
+      .select(
+        `
+          id,
+          user_id,
+          title,
+          location,
+          start_at,
+          end_at,
+          notes,
+          contact_id,
+          deal_id,
+          created_at,
+          updated_at,
+          contacts:contact_id ( id, first_name, last_name ),
+          deals:deal_id ( id, title )
+        `
+      )
+      .single();
+
+    if (error) throw error;
+    return data;
+  }
+
+  function openEdit(ev) {
+    setErr("");
+    setEditing(ev);
+    setEditForm({
+      contact_id: ev.contact_id || "",
+      deal_id: ev.deal_id || "",
+      title: ev.title || "",
+      location: ev.location || "",
+      start_at: localInputFromIso(ev.start_at),
+      end_at: localInputFromIso(ev.end_at),
+      notes: ev.notes || "",
+    });
+  }
+
+  function closeEdit() {
+    if (saving) return;
+    setEditing(null);
+    setEditForm({ contact_id: "", deal_id: "", title: "", location: "", start_at: "", end_at: "", notes: "" });
+  }
+
+  async function saveEdit() {
+    setErr("");
+    if (!editing) return;
+
+    if (!requireWriteOrWarn("Upgrade required to edit calendar events.")) return;
+
+    const title = (editForm.title || "").trim();
+    if (!title) return setErr("Event title can’t be empty.");
+    if (!editForm.contact_id) return setErr("Please select a contact.");
+    if (!editForm.start_at || !editForm.end_at) return setErr("Start and end are required.");
+
+    const startIso = isoFromLocalInput(editForm.start_at);
+    const endIso = isoFromLocalInput(editForm.end_at);
+
+    if (!startIso || !endIso) return setErr("Start/end time is invalid.");
+
+    const start = new Date(startIso);
+    const end = new Date(endIso);
+
+    if (end.getTime() < start.getTime()) return setErr("End must be after start.");
+
+    setSaving(true);
+    try {
+      const patch = {
+        contact_id: editForm.contact_id,
+        deal_id: editForm.deal_id ? editForm.deal_id : null,
+        title,
+        location: editForm.location.trim() ? editForm.location.trim() : null,
+        start_at: startIso,
+        end_at: endIso,
+        notes: editForm.notes.trim() ? editForm.notes.trim() : null,
+      };
+
+      const updated = await updateEvent(editing.id, patch);
+      if (!updated) return;
+
+      setEvents((prev) => sortEvents(prev.map((x) => (x.id === editing.id ? updated : x))));
+      closeEdit();
+    } catch (e) {
+      console.error(e);
+      setErr(e?.message || "Failed to update event");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function deleteEvent(eventId) {
     setErr("");
 
@@ -307,7 +434,7 @@ export default function CalendarPage() {
       const session = await requireSession();
       if (!session) return;
 
-      const { error } = await sb.from("calendar_events").delete().eq("id", eventId);
+      const { error } = await sb.from("calendar_events").delete().eq("id", eventId).eq("user_id", session.user.id);
       if (error) throw error;
 
       setEvents((prev) => prev.filter((x) => x.id !== eventId));
@@ -345,6 +472,21 @@ export default function CalendarPage() {
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form.contact_id]);
+
+  // Keep edit deal valid when edit contact changes
+  useEffect(() => {
+    if (!editing) return;
+    if (!editForm.contact_id) return;
+
+    const dealId = editForm.deal_id;
+    if (!dealId) return;
+
+    const d = deals.find((x) => x.id === dealId);
+    if (d && d.contact_id !== editForm.contact_id) {
+      setEditForm((p) => ({ ...p, deal_id: "" }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editForm.contact_id, deals, editing]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -427,7 +569,7 @@ export default function CalendarPage() {
         </div>
 
         <div style={styles.headerRight}>
-          <button onClick={loadAll} disabled={loading} style={styles.btnGhost}>
+          <button onClick={loadAll} disabled={loading} style={styles.btnGhost} type="button">
             {loading ? "Refreshing..." : "Refresh"}
           </button>
         </div>
@@ -438,7 +580,7 @@ export default function CalendarPage() {
         <div style={{ marginTop: 14 }}>
           <UpgradeBanner
             title="Upgrade to use calendar"
-            body="You can view events, but creating and deleting events requires an active plan."
+            body="You can view events, but creating, editing, and deleting events requires an active plan."
           />
         </div>
       ) : null}
@@ -449,9 +591,7 @@ export default function CalendarPage() {
       <div style={styles.card}>
         <div style={styles.cardTop}>
           <h2 style={styles.h2}>Add Event</h2>
-          {!isBeta && !subLoading && !access ? (
-            <div style={{ fontSize: 12, opacity: 0.8 }}>Writes are disabled until upgrade.</div>
-          ) : null}
+          {!isBeta && !subLoading && !access ? <div style={{ fontSize: 12, opacity: 0.8 }}>Writes are disabled until upgrade.</div> : null}
         </div>
 
         <form onSubmit={addEvent} style={styles.form}>
@@ -673,18 +813,35 @@ export default function CalendarPage() {
                               </div>
                             </div>
 
-                            <button
-                              onClick={() => deleteEvent(ev.id)}
-                              style={{
-                                ...styles.btnDanger,
-                                ...(disableWrites ? { opacity: 0.55, cursor: "not-allowed" } : {}),
-                              }}
-                              type="button"
-                              disabled={disableWrites}
-                              title={isBeta ? "Delete event" : subLoading ? "Checking plan…" : !canWrite ? "Upgrade required" : "Delete event"}
-                            >
-                              Delete
-                            </button>
+                            <div style={{ display: "grid", gap: 10 }}>
+                              <button
+                                onClick={() => openEdit(ev)}
+                                style={{
+                                  ...styles.btnGhost,
+                                  ...(disableWrites ? { opacity: 0.55, cursor: "not-allowed" } : {}),
+                                }}
+                                type="button"
+                                disabled={disableWrites}
+                                title={disableWrites ? (isBeta ? "Edit event" : "Upgrade required") : "Edit event"}
+                              >
+                                Edit
+                              </button>
+
+                              <button
+                                onClick={() => deleteEvent(ev.id)}
+                                style={{
+                                  ...styles.btnDanger,
+                                  ...(disableWrites ? { opacity: 0.55, cursor: "not-allowed" } : {}),
+                                }}
+                                type="button"
+                                disabled={disableWrites}
+                                title={
+                                  isBeta ? "Delete event" : subLoading ? "Checking plan…" : !canWrite ? "Upgrade required" : "Delete event"
+                                }
+                              >
+                                Delete
+                              </button>
+                            </div>
                           </div>
                         </div>
                       );
@@ -696,6 +853,111 @@ export default function CalendarPage() {
           </div>
         )}
       </div>
+
+      {/* ✅ Edit modal */}
+      {editing ? (
+        <div style={styles.modalOverlay} onMouseDown={closeEdit}>
+          <div style={styles.modal} onMouseDown={(e) => e.stopPropagation()}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" }}>
+              <div style={{ fontWeight: 950, fontSize: 18 }}>Edit Event</div>
+              <button onClick={closeEdit} type="button" style={styles.btnGhost} disabled={saving}>
+                Close
+              </button>
+            </div>
+
+            <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
+              <div style={styles.grid2}>
+                <select
+                  value={editForm.contact_id}
+                  onChange={(e) => setEditForm((p) => ({ ...p, contact_id: e.target.value }))}
+                  style={styles.select}
+                  disabled={saving}
+                >
+                  {contacts.length === 0 ? (
+                    <option value="">No contacts found</option>
+                  ) : (
+                    contacts.map((c) => {
+                      const name = `${c.first_name || ""} ${c.last_name || ""}`.trim() || "Unnamed";
+                      return (
+                        <option key={c.id} value={c.id}>
+                          {name}
+                        </option>
+                      );
+                    })
+                  )}
+                </select>
+
+                <select
+                  value={editForm.deal_id}
+                  onChange={(e) => setEditForm((p) => ({ ...p, deal_id: e.target.value }))}
+                  style={styles.select}
+                  disabled={saving}
+                >
+                  <option value="">No deal (optional)</option>
+                  {deals
+                    .filter((d) => !editForm.contact_id || d.contact_id === editForm.contact_id)
+                    .map((d) => (
+                      <option key={d.id} value={d.id}>
+                        {d.title}
+                      </option>
+                    ))}
+                </select>
+              </div>
+
+              <input
+                value={editForm.title}
+                onChange={(e) => setEditForm((p) => ({ ...p, title: e.target.value }))}
+                placeholder="Event title..."
+                style={styles.input}
+                disabled={saving}
+              />
+
+              <input
+                value={editForm.location}
+                onChange={(e) => setEditForm((p) => ({ ...p, location: e.target.value }))}
+                placeholder="Location (optional)..."
+                style={styles.input}
+                disabled={saving}
+              />
+
+              <div style={styles.grid2}>
+                <input
+                  type="datetime-local"
+                  value={editForm.start_at}
+                  onChange={(e) => setEditForm((p) => ({ ...p, start_at: e.target.value }))}
+                  style={{ ...styles.input, colorScheme: "dark" }}
+                  disabled={saving}
+                />
+                <input
+                  type="datetime-local"
+                  value={editForm.end_at}
+                  onChange={(e) => setEditForm((p) => ({ ...p, end_at: e.target.value }))}
+                  style={{ ...styles.input, colorScheme: "dark" }}
+                  disabled={saving}
+                />
+              </div>
+
+              <textarea
+                value={editForm.notes}
+                onChange={(e) => setEditForm((p) => ({ ...p, notes: e.target.value }))}
+                placeholder="Notes (optional)..."
+                style={styles.textarea}
+                rows={4}
+                disabled={saving}
+              />
+
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 6 }}>
+                <button onClick={closeEdit} type="button" style={styles.btnGhost} disabled={saving}>
+                  Cancel
+                </button>
+                <button onClick={saveEdit} type="button" style={styles.btnPrimary} disabled={saving}>
+                  {saving ? "Saving..." : "Save Changes"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -830,6 +1092,7 @@ const styles = {
     cursor: "pointer",
     fontWeight: 900,
     fontSize: 13,
+    whiteSpace: "nowrap",
   },
 
   btnPrimary: {
@@ -915,4 +1178,22 @@ const styles = {
   },
 
   link: { color: "white", fontWeight: 950, textDecoration: "underline" },
+
+  modalOverlay: {
+    position: "fixed",
+    inset: 0,
+    background: "rgba(0,0,0,0.45)",
+    display: "grid",
+    placeItems: "center",
+    padding: 14,
+    zIndex: 50,
+  },
+  modal: {
+    width: "100%",
+    maxWidth: 820,
+    background: "#0f0f0f",
+    border: "1px solid rgba(255,255,255,0.12)",
+    borderRadius: 16,
+    padding: 16,
+  },
 };
