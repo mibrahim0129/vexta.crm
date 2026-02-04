@@ -320,7 +320,7 @@ function SignupInner() {
           border-radius: 12px;
           border: 1px solid rgba(255, 255, 255, 0.14);
           background-color: rgba(255, 255, 255, 0.06);
-          background-image: url("VLT.png");
+          background-image: url("/VLT.png");
           background-repeat: no-repeat;
           background-position: center;
           background-size: contain;
