@@ -2,10 +2,11 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabaseBrowser } from "@/lib/supabase/browser";
 import Footer from "@/app/components/Footer";
+import PublicHeader from "@/app/components/PublicHeader";
 
 const PRICE_MONTHLY = "price_1SuOMyA0KYJ0htSxcZPG0Vkg"; // 7-day trial
 const PRICE_YEARLY = "price_1SuOMyA0KYJ0htSxF9os18YO"; // no trial
@@ -42,6 +43,19 @@ export default function PricingPage() {
   const sb = useMemo(() => supabaseBrowser(), []);
   const [loadingPlan, setLoadingPlan] = useState("");
   const [err, setErr] = useState("");
+  const [hasSession, setHasSession] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      const { data } = await sb.auth.getSession();
+      if (!alive) return;
+      setHasSession(!!data?.session);
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [sb]);
 
   const monthly = useMemo(
     () => ({
@@ -52,7 +66,12 @@ export default function PricingPage() {
       kicker: "7-day free trial",
       kickerNote: "Card required • Cancel anytime during trial",
       highlight: "Try Vexta free for 7 days",
-      bullets: ["Full CRM access during trial", "Contacts, deals, notes, tasks", "Pipeline + activity tracking", "Email support"],
+      bullets: [
+        "Full CRM access during trial",
+        "Contacts, deals, notes, tasks",
+        "Pipeline + activity tracking",
+        "Email support",
+      ],
       priceId: PRICE_MONTHLY,
       cta: "Start 7-day free trial",
       badge: "Best to start",
@@ -119,35 +138,8 @@ export default function PricingPage() {
     <main className="page">
       <div className="bg" />
 
-      <header className="header">
-        <div className="wrap headerInner">
-          <Link href="/" className="brand" aria-label="Vexta home">
-            <span className="logoMark" aria-hidden="true" />
-            <span className="brandName">Vexta</span>
-          </Link>
-
-          <nav className="nav" aria-label="Primary navigation">
-            <Link className="navLink" href="/">
-              Home
-            </Link>
-            <Link className="navLink" href="/pricing">
-              Pricing
-            </Link>
-            <Link className="navLink" href="/login">
-              Log in
-            </Link>
-          </nav>
-
-          <div className="headerActions">
-            <Link href="/login" className="btn btnGhost">
-              Log in
-            </Link>
-            <Link href="/signup" className="btn btnPrimary">
-              Sign up
-            </Link>
-          </div>
-        </div>
-      </header>
+      {/* ✅ Shared header */}
+      <PublicHeader variant="dark" active="pricing" right="signup" />
 
       <section className="wrap top">
         <div className="titleRow">
@@ -157,15 +149,15 @@ export default function PricingPage() {
               Simple plans • Cancel anytime
             </div>
             <h1 className="h1">Pricing</h1>
-            <p className="subhead">
-              Start with the monthly trial, or go yearly for the best value.
-            </p>
+            <p className="subhead">Start with the monthly trial, or go yearly for the best value.</p>
           </div>
 
           <div className="titleActions">
-            <Link href="/dashboard" className="btn btnGhost">
-              Back to dashboard
-            </Link>
+            {hasSession ? (
+              <Link href="/dashboard" className="btn btnGhost">
+                Back to dashboard
+              </Link>
+            ) : null}
           </div>
         </div>
 
@@ -194,7 +186,6 @@ export default function PricingPage() {
         </div>
 
         <div className="footerWrap">
-          {/* If your Footer supports dark, use variant="dark". If not, change back to "light". */}
           <Footer variant="dark" />
         </div>
       </section>
@@ -209,9 +200,8 @@ export default function PricingPage() {
           position: fixed;
           inset: 0;
           z-index: -1;
-          background:
-            radial-gradient(1200px circle at 18% 10%, rgba(255, 255, 255, 0.14), transparent 62%),
-            radial-gradient(900px circle at 82% 24%, rgba(138, 180, 255, 0.10), transparent 55%),
+          background: radial-gradient(1200px circle at 18% 10%, rgba(255, 255, 255, 0.14), transparent 62%),
+            radial-gradient(900px circle at 82% 24%, rgba(138, 180, 255, 0.1), transparent 55%),
             radial-gradient(800px circle at 50% 90%, rgba(255, 255, 255, 0.06), transparent 60%),
             linear-gradient(to bottom, #070707, #000);
         }
@@ -220,99 +210,6 @@ export default function PricingPage() {
           max-width: 1120px;
           margin: 0 auto;
           padding: 0 18px;
-        }
-
-        .header {
-          position: sticky;
-          top: 0;
-          z-index: 50;
-          border-bottom: 1px solid rgba(255, 255, 255, 0.10);
-          background: rgba(7, 7, 7, 0.75);
-          backdrop-filter: blur(12px);
-        }
-        .headerInner {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          padding: 14px 0;
-          gap: 12px;
-        }
-        .brand {
-          display: inline-flex;
-          align-items: center;
-          gap: 10px;
-          text-decoration: none;
-          color: #fff;
-        }
-        .logoMark {
-          width: 36px;
-          height: 36px;
-          border-radius: 12px;
-          border: 1px solid rgba(255, 255, 255, 0.14);
-          background-color: rgba(255, 255, 255, 0.06);
-          background-image: url("/VLT.png");
-          background-repeat: no-repeat;
-          background-position: center;
-          background-size: contain;
-          box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
-        }
-        .brandName {
-          font-size: 18px;
-          font-weight: 950;
-          letter-spacing: -0.4px;
-        }
-
-        .nav {
-          display: none;
-          gap: 18px;
-          align-items: center;
-        }
-        .navLink {
-          color: rgba(255, 255, 255, 0.75);
-          text-decoration: none;
-          font-size: 14px;
-          font-weight: 750;
-        }
-        .navLink:hover {
-          color: #fff;
-        }
-        .headerActions {
-          display: flex;
-          gap: 10px;
-          align-items: center;
-        }
-
-        .btn {
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          gap: 8px;
-          padding: 10px 14px;
-          border-radius: 14px;
-          font-weight: 900;
-          font-size: 14px;
-          text-decoration: none;
-          cursor: pointer;
-          transition: transform 0.06s ease, background 0.15s ease, border-color 0.15s ease;
-          user-select: none;
-          border: 1px solid rgba(255, 255, 255, 0.14);
-        }
-        .btn:active {
-          transform: translateY(1px);
-        }
-        .btnPrimary {
-          background: #fff;
-          color: #0a0a0a;
-        }
-        .btnPrimary:hover {
-          background: rgba(255, 255, 255, 0.92);
-        }
-        .btnGhost {
-          background: rgba(255, 255, 255, 0.06);
-          color: #fff;
-        }
-        .btnGhost:hover {
-          background: rgba(255, 255, 255, 0.10);
         }
 
         .top {
@@ -360,10 +257,36 @@ export default function PricingPage() {
           max-width: 620px;
         }
 
+        .btn {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+          padding: 10px 14px;
+          border-radius: 14px;
+          font-weight: 900;
+          font-size: 14px;
+          text-decoration: none;
+          cursor: pointer;
+          transition: transform 0.06s ease, background 0.15s ease, border-color 0.15s ease;
+          user-select: none;
+          border: 1px solid rgba(255, 255, 255, 0.14);
+        }
+        .btn:active {
+          transform: translateY(1px);
+        }
+        .btnGhost {
+          background: rgba(255, 255, 255, 0.06);
+          color: #fff;
+        }
+        .btnGhost:hover {
+          background: rgba(255, 255, 255, 0.1);
+        }
+
         .errorBox {
           margin: 12px 0 16px;
           border: 1px solid rgba(255, 99, 99, 0.35);
-          background: rgba(255, 99, 99, 0.10);
+          background: rgba(255, 99, 99, 0.1);
           color: rgba(255, 210, 210, 0.95);
           padding: 12px 14px;
           border-radius: 16px;
@@ -392,9 +315,6 @@ export default function PricingPage() {
         }
 
         @media (min-width: 900px) {
-          .nav {
-            display: flex;
-          }
           .grid {
             grid-template-columns: repeat(2, 1fr);
           }
@@ -413,9 +333,7 @@ function PlanCard({ plan, loading, onChoose }) {
         <div>
           <div className="planRow">
             <div className="planName">{plan.label}</div>
-            <div className={`badge ${plan.intent === "value" ? "badgeValue" : ""}`}>
-              {plan.badge}
-            </div>
+            <div className={`badge ${plan.intent === "value" ? "badgeValue" : ""}`}>{plan.badge}</div>
           </div>
 
           <div className="priceRow">
@@ -471,7 +389,7 @@ function PlanCard({ plan, loading, onChoose }) {
           inset: -120px auto auto -120px;
           width: 240px;
           height: 240px;
-          background: radial-gradient(circle, rgba(138,180,255,0.18), transparent 65%);
+          background: radial-gradient(circle, rgba(138, 180, 255, 0.18), transparent 65%);
         }
 
         .cardTop {
@@ -501,7 +419,7 @@ function PlanCard({ plan, loading, onChoose }) {
         }
         .badgeValue {
           border-color: rgba(138, 180, 255, 0.26);
-          background: rgba(138, 180, 255, 0.10);
+          background: rgba(138, 180, 255, 0.1);
           color: rgba(255, 255, 255, 0.92);
         }
 
@@ -618,7 +536,7 @@ function PlanCard({ plan, loading, onChoose }) {
           color: #fff;
         }
         .ctaBtnGhost:hover:enabled {
-          background: rgba(255, 255, 255, 0.10);
+          background: rgba(255, 255, 255, 0.1);
         }
       `}</style>
     </div>
