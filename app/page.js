@@ -39,18 +39,8 @@ function LayersIcon() {
         strokeWidth="2.2"
         strokeLinejoin="round"
       />
-      <path
-        d="M3 12l9 5 9-5"
-        stroke="currentColor"
-        strokeWidth="2.2"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M3 16l9 5 9-5"
-        stroke="currentColor"
-        strokeWidth="2.2"
-        strokeLinejoin="round"
-      />
+      <path d="M3 12l9 5 9-5" stroke="currentColor" strokeWidth="2.2" strokeLinejoin="round" />
+      <path d="M3 16l9 5 9-5" stroke="currentColor" strokeWidth="2.2" strokeLinejoin="round" />
     </svg>
   );
 }
@@ -122,9 +112,10 @@ export default function HomePage() {
             <Link className="navLink" href="/pricing">
               Pricing
             </Link>
-            <a className="navLink" href="#about">
+            {/* ✅ Make About "official" */}
+            <Link className="navLink" href="/about">
               About
-            </a>
+            </Link>
           </nav>
 
           <div className="headerActions">
@@ -209,7 +200,6 @@ export default function HomePage() {
 
             <div className="previewBody">
               <div className="previewGrid">
-                {/* “Sidebar” hint */}
                 <div className="side">
                   <div className="sideItem sideActive">Dashboard</div>
                   <div className="sideItem">Contacts</div>
@@ -218,7 +208,6 @@ export default function HomePage() {
                   <div className="sideItem">Calendar</div>
                 </div>
 
-                {/* Main panel */}
                 <div className="main">
                   <div className="kpis">
                     <div className="kpi">
@@ -253,9 +242,7 @@ export default function HomePage() {
                     </div>
                   </div>
 
-                  <div className="hint">
-                    Built to keep the next action obvious — all day, every day.
-                  </div>
+                  <div className="hint">Built to keep the next action obvious — all day, every day.</div>
                 </div>
               </div>
             </div>
@@ -277,31 +264,11 @@ export default function HomePage() {
               title="Contact Profile Hub"
               desc="Deals, notes, tasks, calendar events — in one place with smart filtering."
             />
-            <Feature
-              icon={<SparkIcon />}
-              title="Deal Pages that Pop"
-              desc="Stats + task buckets + upcoming events so you can run the deal."
-            />
-            <Feature
-              icon={<ClockIcon />}
-              title="Tasks & Calendar That Connect"
-              desc="Filter by contact, link/unlink, and keep the day organized."
-            />
-            <Feature
-              icon={<SparkIcon />}
-              title="Fast Filters"
-              desc="Search + status + due date filters designed for daily use."
-            />
-            <Feature
-              icon={<LayersIcon />}
-              title="Clean UI"
-              desc="No clutter. Just what you use constantly, done well."
-            />
-            <Feature
-              icon={<ClockIcon />}
-              title="Secure Foundation"
-              desc="Supabase auth + dashboard protection + Google OAuth."
-            />
+            <Feature icon={<SparkIcon />} title="Deal Pages that Pop" desc="Stats + task buckets + upcoming events so you can run the deal." />
+            <Feature icon={<ClockIcon />} title="Tasks & Calendar That Connect" desc="Filter by contact, link/unlink, and keep the day organized." />
+            <Feature icon={<SparkIcon />} title="Fast Filters" desc="Search + status + due date filters designed for daily use." />
+            <Feature icon={<LayersIcon />} title="Clean UI" desc="No clutter. Just what you use constantly, done well." />
+            <Feature icon={<ClockIcon />} title="Secure Foundation" desc="Supabase auth + dashboard protection + Google OAuth." />
           </div>
         </div>
       </section>
@@ -310,17 +277,13 @@ export default function HomePage() {
       <section className="section">
         <div className="wrap">
           <h2 className="h2">Simple yearly pricing</h2>
-          <p className="p2">
-            One plan for agents who want clarity, speed, and a CRM they’ll actually use.
-          </p>
+          <p className="p2">One plan for agents who want clarity, speed, and a CRM they’ll actually use.</p>
 
           <div className="pricingTeaser">
             <div className="pricingBox">
               <div className="pricingLabel">Yearly plan</div>
               <div className="pricingTitle">Everything you need to run your pipeline</div>
-              <div className="pricingMeta">
-                Contacts • Deals • Tasks • Notes • Calendar • Filters
-              </div>
+              <div className="pricingMeta">Contacts • Deals • Tasks • Notes • Calendar • Filters</div>
             </div>
 
             <div className="pricingActions">
@@ -335,8 +298,8 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* ABOUT */}
-      <section id="about" className="section sectionAlt">
+      {/* ABOUT TEASER (keep short + point to /about) */}
+      <section className="section sectionAlt">
         <div className="wrap">
           <h2 className="h2">About Vexta</h2>
           <p className="p2">
@@ -345,11 +308,11 @@ export default function HomePage() {
           </p>
 
           <div className="ctaRow">
+            <Link href="/about" className="btn btnGhost btnLg">
+              Read the full story
+            </Link>
             <Link href="/signup" className="btn btnPrimary btnLg">
               Sign up
-            </Link>
-            <Link href="/login" className="btn btnGhost btnLg">
-              Log in
             </Link>
           </div>
         </div>
@@ -360,6 +323,7 @@ export default function HomePage() {
           <div className="footerText">© {new Date().getFullYear()} Vexta CRM</div>
           <div className="footerLinks">
             <Link href="/pricing">Pricing</Link>
+            <Link href="/about">About</Link>
             <Link href="/login">Log in</Link>
             <Link href="/signup">Sign up</Link>
           </div>
