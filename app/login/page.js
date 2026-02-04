@@ -6,6 +6,7 @@ import { Suspense, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabaseBrowser } from "@/lib/supabase/browser";
 import Footer from "@/app/components/Footer";
+import PublicHeader from "@/app/components/PublicHeader";
 
 function GoogleIcon() {
   return (
@@ -122,23 +123,8 @@ function LoginInner() {
     <main className="page">
       <div className="bg" />
 
-      <header className="header">
-        <div className="wrap headerInner">
-          <Link href="/" className="brand" aria-label="Vexta home">
-            <span className="logoMark" aria-hidden="true" />
-            <span className="brandName">Vexta</span>
-          </Link>
-
-          <div className="headerActions">
-            <Link href="/pricing" className="btn btnGhost">
-              Pricing
-            </Link>
-            <Link href="/signup" className="btn btnPrimary">
-              Sign up
-            </Link>
-          </div>
-        </div>
-      </header>
+      {/* ✅ Shared header */}
+      <PublicHeader variant="dark" active="" right="signup" />
 
       <section className="wrap layout">
         {/* Left (desktop) */}
@@ -153,8 +139,8 @@ function LoginInner() {
           </h1>
 
           <p className="p">
-            Log in to manage contacts, deals, tasks, notes, and calendar events — all linked so your
-            next action is always obvious.
+            Log in to manage contacts, deals, tasks, notes, and calendar events — all linked so your next action is
+            always obvious.
           </p>
 
           <div className="leftStack">
@@ -233,11 +219,7 @@ function LoginInner() {
                 />
               </label>
 
-              <button
-                type="submit"
-                className="btn btnGhost btnFull btnLg"
-                disabled={loading || oauthLoading}
-              >
+              <button type="submit" className="btn btnGhost btnFull btnLg" disabled={loading || oauthLoading}>
                 {loading ? "Logging in..." : "Log in"}
               </button>
             </form>
@@ -277,8 +259,7 @@ function LoginInner() {
           position: fixed;
           inset: 0;
           z-index: -1;
-          background:
-            radial-gradient(1200px circle at 18% 10%, rgba(255, 255, 255, 0.14), transparent 62%),
+          background: radial-gradient(1200px circle at 18% 10%, rgba(255, 255, 255, 0.14), transparent 62%),
             radial-gradient(900px circle at 82% 24%, rgba(138, 180, 255, 0.10), transparent 55%),
             radial-gradient(800px circle at 50% 90%, rgba(255, 255, 255, 0.06), transparent 60%),
             linear-gradient(to bottom, #070707, #000);
@@ -288,52 +269,6 @@ function LoginInner() {
           max-width: 1120px;
           margin: 0 auto;
           padding: 0 18px;
-        }
-
-        /* Header */
-        .header {
-          position: sticky;
-          top: 0;
-          z-index: 50;
-          border-bottom: 1px solid rgba(255, 255, 255, 0.10);
-          background: rgba(7, 7, 7, 0.75);
-          backdrop-filter: blur(12px);
-        }
-        .headerInner {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          padding: 14px 0;
-          gap: 12px;
-        }
-        .brand {
-          display: inline-flex;
-          align-items: center;
-          gap: 10px;
-          text-decoration: none;
-          color: #fff;
-        }
-        .logoMark {
-          width: 36px;
-          height: 36px;
-          border-radius: 12px;
-          border: 1px solid rgba(255, 255, 255, 0.14);
-          background-color: rgba(255, 255, 255, 0.06);
-          background-image: url("/VLT.png");
-          background-repeat: no-repeat;
-          background-position: center;
-          background-size: contain;
-          box-shadow: 0 10px 30px rgba(0,0,0,0.4);
-        }
-        .brandName {
-          font-size: 18px;
-          font-weight: 950;
-          letter-spacing: -0.4px;
-        }
-        .headerActions {
-          display: flex;
-          gap: 10px;
-          align-items: center;
         }
 
         /* Layout */
@@ -453,7 +388,7 @@ function LoginInner() {
           inset: -140px auto auto -140px;
           width: 260px;
           height: 260px;
-          background: radial-gradient(circle, rgba(138,180,255,0.16), transparent 65%);
+          background: radial-gradient(circle, rgba(138, 180, 255, 0.16), transparent 65%);
         }
         .cardTop {
           position: relative;
