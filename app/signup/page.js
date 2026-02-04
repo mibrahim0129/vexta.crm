@@ -6,6 +6,7 @@ import { Suspense, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabaseBrowser } from "@/lib/supabase/browser";
 import Footer from "@/app/components/Footer";
+import PublicHeader from "@/app/components/PublicHeader";
 
 function GoogleIcon() {
   return (
@@ -93,10 +94,7 @@ function SignupInner() {
 
     setLoading(true);
     try {
-      const { data, error: signUpError } = await sb.auth.signUp({
-        email,
-        password,
-      });
+      const { data, error: signUpError } = await sb.auth.signUp({ email, password });
 
       if (signUpError) {
         setError(signUpError.message || "Sign up failed.");
@@ -136,10 +134,7 @@ function SignupInner() {
 
       const { error } = await sb.auth.signInWithOAuth({
         provider: "google",
-        options: {
-          redirectTo: cb,
-          queryParams: { prompt: "select_account" },
-        },
+        options: { redirectTo: cb, queryParams: { prompt: "select_account" } },
       });
 
       if (error) {
@@ -156,23 +151,7 @@ function SignupInner() {
     <main className="page">
       <div className="bg" />
 
-      <header className="header">
-        <div className="wrap headerInner">
-          <Link href="/" className="brand" aria-label="Vexta home">
-            <span className="logoMark" aria-hidden="true" />
-            <span className="brandName">Vexta</span>
-          </Link>
-
-          <div className="headerActions">
-            <Link href="/pricing" className="btn btnGhost">
-              Pricing
-            </Link>
-            <Link href="/login" className="btn btnPrimary">
-              Log in
-            </Link>
-          </div>
-        </div>
-      </header>
+      <PublicHeader variant="dark" active="" right="login" />
 
       <section className="wrap content">
         <div className="card">
@@ -183,15 +162,11 @@ function SignupInner() {
 
           <h1 className="h1">Create your account</h1>
           <p className="p">
-            {isBeta
-              ? "Beta access is limited while we test stability."
-              : "Start managing your pipeline in one place."}
+            {isBeta ? "Beta access is limited while we test stability." : "Start managing your pipeline in one place."}
           </p>
 
           {allowlistEnabled ? (
-            <div className="hint">
-              Invite-only beta is enabled. Use an approved email to create an account.
-            </div>
+            <div className="hint">Invite-only beta is enabled. Use an approved email to create an account.</div>
           ) : null}
 
           {error ? <div className="error">{error}</div> : null}
@@ -291,96 +266,6 @@ function SignupInner() {
           padding: 0 18px;
         }
 
-        /* Header */
-        .header {
-          position: sticky;
-          top: 0;
-          z-index: 50;
-          border-bottom: 1px solid rgba(255, 255, 255, 0.10);
-          background: rgba(7, 7, 7, 0.75);
-          backdrop-filter: blur(12px);
-        }
-        .headerInner {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          padding: 14px 0;
-          gap: 12px;
-        }
-        .brand {
-          display: inline-flex;
-          align-items: center;
-          gap: 10px;
-          text-decoration: none;
-          color: #fff;
-        }
-        .logoMark {
-          width: 36px;
-          height: 36px;
-          border-radius: 12px;
-          border: 1px solid rgba(255, 255, 255, 0.14);
-          background-color: rgba(255, 255, 255, 0.06);
-          background-image: url("/VLT.png");
-          background-repeat: no-repeat;
-          background-position: center;
-          background-size: contain;
-          box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
-        }
-        .brandName {
-          font-size: 18px;
-          font-weight: 950;
-          letter-spacing: -0.4px;
-        }
-        .headerActions {
-          display: flex;
-          gap: 10px;
-          align-items: center;
-        }
-
-        /* Buttons */
-        .btn {
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          gap: 10px;
-          padding: 10px 12px;
-          border-radius: 14px;
-          border: 1px solid rgba(255, 255, 255, 0.14);
-          font-weight: 900;
-          font-size: 14px;
-          cursor: pointer;
-          user-select: none;
-          transition: transform 0.06s ease, background 0.15s ease, border-color 0.15s ease;
-          text-decoration: none;
-        }
-        .btn:active {
-          transform: translateY(1px);
-        }
-        .btn:disabled {
-          opacity: 0.65;
-          cursor: not-allowed;
-        }
-        .btnFull {
-          width: 100%;
-        }
-        .btnLg {
-          padding: 12px 14px;
-        }
-        .btnPrimary {
-          background: #fff;
-          color: #0a0a0a;
-        }
-        .btnPrimary:hover:enabled {
-          background: rgba(255, 255, 255, 0.92);
-        }
-        .btnGhost {
-          background: rgba(255, 255, 255, 0.06);
-          color: #fff;
-        }
-        .btnGhost:hover:enabled {
-          background: rgba(255, 255, 255, 0.10);
-        }
-
         /* Content */
         .content {
           padding: 48px 0 18px;
@@ -406,7 +291,7 @@ function SignupInner() {
           inset: -140px auto auto -140px;
           width: 260px;
           height: 260px;
-          background: radial-gradient(circle, rgba(138,180,255,0.16), transparent 65%);
+          background: radial-gradient(circle, rgba(138, 180, 255, 0.16), transparent 65%);
         }
 
         .pill {
@@ -499,6 +384,51 @@ function SignupInner() {
           font-size: 12px;
           color: rgba(255, 255, 255, 0.55);
           font-weight: 850;
+        }
+
+        /* Buttons */
+        .btn {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          gap: 10px;
+          padding: 10px 12px;
+          border-radius: 14px;
+          border: 1px solid rgba(255, 255, 255, 0.14);
+          font-weight: 900;
+          font-size: 14px;
+          cursor: pointer;
+          user-select: none;
+          transition: transform 0.06s ease, background 0.15s ease, border-color 0.15s ease;
+          text-decoration: none;
+          position: relative;
+        }
+        .btn:active {
+          transform: translateY(1px);
+        }
+        .btn:disabled {
+          opacity: 0.65;
+          cursor: not-allowed;
+        }
+        .btnFull {
+          width: 100%;
+        }
+        .btnLg {
+          padding: 12px 14px;
+        }
+        .btnPrimary {
+          background: #fff;
+          color: #0a0a0a;
+        }
+        .btnPrimary:hover:enabled {
+          background: rgba(255, 255, 255, 0.92);
+        }
+        .btnGhost {
+          background: rgba(255, 255, 255, 0.06);
+          color: #fff;
+        }
+        .btnGhost:hover:enabled {
+          background: rgba(255, 255, 255, 0.10);
         }
 
         .form {
