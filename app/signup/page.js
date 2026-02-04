@@ -35,7 +35,6 @@ function normalizeEmail(s) {
 }
 
 function parseAllowlist(raw) {
-  // env format: "a@b.com, c@d.com"
   const set = new Set();
   String(raw || "")
     .split(",")
@@ -50,7 +49,6 @@ function SignupInner() {
   const sp = useSearchParams();
   const sb = useMemo(() => supabaseBrowser(), []);
 
-  // ✅ Beta Mode + allowlist (no helpers)
   const isBeta = process.env.NEXT_PUBLIC_BETA_MODE === "true";
   const allowlist = useMemo(() => parseAllowlist(process.env.NEXT_PUBLIC_BETA_ALLOWLIST), []);
   const allowlistEnabled = isBeta && allowlist.size > 0;
@@ -69,7 +67,7 @@ function SignupInner() {
   const [ok, setOk] = useState("");
 
   function isAllowedEmail(candidate) {
-    if (!allowlistEnabled) return true; // not enabled → let anyone sign up
+    if (!allowlistEnabled) return true;
     return allowlist.has(normalizeEmail(candidate));
   }
 
@@ -83,7 +81,6 @@ function SignupInner() {
       return;
     }
 
-    // ✅ Invite-only beta check (email/password)
     if (!isAllowedEmail(email)) {
       setError("Vexta Beta is invite-only. This email is not on the allowlist.");
       return;
@@ -106,14 +103,12 @@ function SignupInner() {
         return;
       }
 
-      // If session exists immediately, go dashboard.
       if (data?.session) {
         router.refresh();
         router.push(redirectTo);
         return;
       }
 
-      // Otherwise email confirmation might be required.
       setOk("Account created. Check your email to confirm, then log in.");
     } catch {
       setError("Something went wrong. Please try again.");
@@ -126,10 +121,6 @@ function SignupInner() {
     setError("");
     setOk("");
 
-    // ✅ Invite-only beta check (Google)
-    // We need the email to validate, but Google OAuth happens before we get it.
-    // So: in allowlist mode we require them to use email/password signup,
-    // OR they can email you to be added. This keeps beta tight & simple.
     if (allowlistEnabled) {
       setError("Vexta Beta is invite-only. Please sign up with email/password using an approved email.");
       return;
@@ -138,11 +129,10 @@ function SignupInner() {
     setOauthLoading(true);
 
     try {
-      // Store where to go AFTER signup/login
       localStorage.setItem("vexta_next", redirectTo);
 
       const origin = window.location.origin;
-      const cb = `${origin}/auth/callback`; // ✅ NO query params
+      const cb = `${origin}/auth/callback`;
 
       const { error } = await sb.auth.signInWithOAuth({
         provider: "google",
@@ -166,16 +156,36 @@ function SignupInner() {
     <main className="page">
       <div className="bg" />
 
-      <div className="wrap">
-        <div className="card">
-          <Link href="/" className="brand">
-            <span className="logo" />
+      <header className="header">
+        <div className="wrap headerInner">
+          <Link href="/" className="brand" aria-label="Vexta home">
+            <span className="logoMark" aria-hidden="true" />
             <span className="brandName">Vexta</span>
           </Link>
 
+          <div className="headerActions">
+            <Link href="/pricing" className="btn btnGhost">
+              Pricing
+            </Link>
+            <Link href="/login" className="btn btnPrimary">
+              Log in
+            </Link>
+          </div>
+        </div>
+      </header>
+
+      <section className="wrap content">
+        <div className="card">
+          <div className="pill">
+            <span className="pillDot" aria-hidden="true" />
+            {isBeta ? "Beta access" : "Get started"}
+          </div>
+
           <h1 className="h1">Create your account</h1>
           <p className="p">
-            {isBeta ? "Beta access is limited while we test stability." : "Start managing your pipeline in one place."}
+            {isBeta
+              ? "Beta access is limited while we test stability."
+              : "Start managing your pipeline in one place."}
           </p>
 
           {allowlistEnabled ? (
@@ -189,7 +199,7 @@ function SignupInner() {
 
           <button
             type="button"
-            className="btn btnPrimary btnFull"
+            className="btn btnPrimary btnFull btnLg"
             onClick={signUpWithGoogle}
             disabled={loading || oauthLoading}
             title={allowlistEnabled ? "Google signup disabled in invite-only beta" : "Continue with Google"}
@@ -198,7 +208,7 @@ function SignupInner() {
             {oauthLoading ? "Connecting..." : "Continue with Google"}
           </button>
 
-          <div className="orRow">
+          <div className="orRow" aria-hidden="true">
             <div className="line" />
             <div className="or">or</div>
             <div className="line" />
@@ -229,7 +239,7 @@ function SignupInner() {
               />
             </label>
 
-            <button type="submit" className="btn btnGhost btnFull" disabled={loading || oauthLoading}>
+            <button type="submit" className="btn btnGhost btnFull btnLg" disabled={loading || oauthLoading}>
               {loading ? "Creating..." : "Create account"}
             </button>
           </form>
@@ -248,40 +258,54 @@ function SignupInner() {
           </div>
         </div>
 
-        <div className="footerWrap">
-          <Footer variant="dark" />
+        <div className="fine">
+          By continuing, you agree to our <Link href="/terms">Terms</Link> and{" "}
+          <Link href="/privacy">Privacy Policy</Link>.
         </div>
+      </section>
+
+      <div className="footerWrap">
+        <Footer variant="dark" />
       </div>
 
       <style jsx>{`
         .page {
           min-height: 100vh;
           color: #fff;
-          background: #0a0a0a;
-          display: grid;
-          place-items: center;
-          padding: 24px 18px;
+          background: #070707;
         }
         .bg {
           position: fixed;
           inset: 0;
           z-index: -1;
-          background: radial-gradient(1000px circle at 20% 10%, rgba(255, 255, 255, 0.12), transparent 60%),
-            radial-gradient(900px circle at 80% 35%, rgba(255, 255, 255, 0.1), transparent 55%),
-            linear-gradient(to bottom, #0a0a0a, #000);
+          background:
+            radial-gradient(1200px circle at 18% 10%, rgba(255, 255, 255, 0.14), transparent 62%),
+            radial-gradient(900px circle at 82% 24%, rgba(138, 180, 255, 0.10), transparent 55%),
+            radial-gradient(800px circle at 50% 90%, rgba(255, 255, 255, 0.06), transparent 60%),
+            linear-gradient(to bottom, #070707, #000);
         }
         .wrap {
           width: 100%;
-          max-width: 560px;
-          display: grid;
-          gap: 14px;
+          max-width: 1120px;
+          margin: 0 auto;
+          padding: 0 18px;
         }
-        .card {
-          border-radius: 18px;
-          border: 1px solid rgba(255, 255, 255, 0.1);
-          background: rgba(255, 255, 255, 0.06);
-          box-shadow: 0 30px 120px rgba(0, 0, 0, 0.55);
-          padding: 18px;
+
+        /* Header */
+        .header {
+          position: sticky;
+          top: 0;
+          z-index: 50;
+          border-bottom: 1px solid rgba(255, 255, 255, 0.10);
+          background: rgba(7, 7, 7, 0.75);
+          backdrop-filter: blur(12px);
+        }
+        .headerInner {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 14px 0;
+          gap: 12px;
         }
         .brand {
           display: inline-flex;
@@ -290,99 +314,30 @@ function SignupInner() {
           text-decoration: none;
           color: #fff;
         }
-        .logo {
-          width: 34px;
-          height: 34px;
+        .logoMark {
+          width: 36px;
+          height: 36px;
           border-radius: 12px;
-          background: #fff;
+          border: 1px solid rgba(255, 255, 255, 0.14);
+          background-color: rgba(255, 255, 255, 0.06);
+          background-image: url("/VLT.png");
+          background-repeat: no-repeat;
+          background-position: center;
+          background-size: contain;
+          box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
         }
         .brandName {
           font-size: 18px;
-          font-weight: 900;
+          font-weight: 950;
           letter-spacing: -0.4px;
         }
-        .h1 {
-          margin: 14px 0 0;
-          font-size: 28px;
-          font-weight: 950;
-          letter-spacing: -0.6px;
-        }
-        .p {
-          margin: 8px 0 0;
-          color: rgba(255, 255, 255, 0.65);
-          font-size: 13px;
-        }
-        .hint {
-          margin-top: 12px;
-          border-radius: 14px;
-          border: 1px solid rgba(255, 255, 255, 0.14);
-          background: rgba(255, 255, 255, 0.05);
-          color: rgba(255, 255, 255, 0.88);
-          padding: 12px;
-          font-weight: 850;
-          font-size: 13px;
-          line-height: 1.35;
-        }
-        .error {
-          margin-top: 12px;
-          border-radius: 14px;
-          border: 1px solid rgba(239, 68, 68, 0.35);
-          background: rgba(239, 68, 68, 0.1);
-          color: #fecaca;
-          padding: 12px;
-          font-weight: 850;
-          font-size: 13px;
-          line-height: 1.35;
-        }
-        .ok {
-          margin-top: 12px;
-          border-radius: 14px;
-          border: 1px solid rgba(34, 197, 94, 0.25);
-          background: rgba(34, 197, 94, 0.08);
-          color: rgba(220, 252, 231, 0.95);
-          padding: 12px;
-          font-weight: 850;
-          font-size: 13px;
-          line-height: 1.35;
-        }
-        .orRow {
-          margin: 14px 0;
+        .headerActions {
           display: flex;
-          align-items: center;
           gap: 10px;
+          align-items: center;
         }
-        .line {
-          height: 1px;
-          flex: 1;
-          background: rgba(255, 255, 255, 0.1);
-        }
-        .or {
-          font-size: 12px;
-          color: rgba(255, 255, 255, 0.55);
-          font-weight: 800;
-        }
-        .form {
-          display: grid;
-          gap: 12px;
-          margin-top: 6px;
-        }
-        .label {
-          display: grid;
-          gap: 6px;
-          font-size: 12px;
-          font-weight: 900;
-          color: rgba(255, 255, 255, 0.8);
-        }
-        .input {
-          width: 100%;
-          border-radius: 14px;
-          border: 1px solid rgba(255, 255, 255, 0.1);
-          background: rgba(0, 0, 0, 0.28);
-          padding: 10px 12px;
-          color: #fff;
-          outline: none;
-          font-size: 14px;
-        }
+
+        /* Buttons */
         .btn {
           display: inline-flex;
           align-items: center;
@@ -390,14 +345,13 @@ function SignupInner() {
           gap: 10px;
           padding: 10px 12px;
           border-radius: 14px;
-          border: 1px solid rgba(255, 255, 255, 0.12);
+          border: 1px solid rgba(255, 255, 255, 0.14);
           font-weight: 900;
           font-size: 14px;
           cursor: pointer;
           user-select: none;
-          transition: transform 0.05s ease, background 0.15s ease;
-          color: #fff;
-          background: rgba(255, 255, 255, 0.06);
+          transition: transform 0.06s ease, background 0.15s ease, border-color 0.15s ease;
+          text-decoration: none;
         }
         .btn:active {
           transform: translateY(1px);
@@ -409,25 +363,193 @@ function SignupInner() {
         .btnFull {
           width: 100%;
         }
+        .btnLg {
+          padding: 12px 14px;
+        }
         .btnPrimary {
           background: #fff;
           color: #0a0a0a;
         }
-        .btnGhost:hover {
-          background: rgba(255, 255, 255, 0.1);
+        .btnPrimary:hover:enabled {
+          background: rgba(255, 255, 255, 0.92);
         }
+        .btnGhost {
+          background: rgba(255, 255, 255, 0.06);
+          color: #fff;
+        }
+        .btnGhost:hover:enabled {
+          background: rgba(255, 255, 255, 0.10);
+        }
+
+        /* Content */
+        .content {
+          padding: 48px 0 18px;
+          display: grid;
+          gap: 12px;
+          justify-items: center;
+        }
+
+        .card {
+          width: 100%;
+          max-width: 520px;
+          border-radius: 20px;
+          border: 1px solid rgba(255, 255, 255, 0.12);
+          background: rgba(255, 255, 255, 0.06);
+          box-shadow: 0 38px 160px rgba(0, 0, 0, 0.55);
+          padding: 18px;
+          position: relative;
+          overflow: hidden;
+        }
+        .card::before {
+          content: "";
+          position: absolute;
+          inset: -140px auto auto -140px;
+          width: 260px;
+          height: 260px;
+          background: radial-gradient(circle, rgba(138,180,255,0.16), transparent 65%);
+        }
+
+        .pill {
+          display: inline-flex;
+          align-items: center;
+          gap: 10px;
+          padding: 8px 12px;
+          border-radius: 999px;
+          border: 1px solid rgba(255, 255, 255, 0.14);
+          background: rgba(255, 255, 255, 0.06);
+          font-size: 12px;
+          font-weight: 850;
+          color: rgba(255, 255, 255, 0.86);
+          position: relative;
+        }
+        .pillDot {
+          width: 7px;
+          height: 7px;
+          border-radius: 999px;
+          background: rgba(138, 180, 255, 0.95);
+          box-shadow: 0 0 0 4px rgba(138, 180, 255, 0.12);
+        }
+
+        .h1 {
+          margin: 14px 0 0;
+          font-size: 30px;
+          font-weight: 980;
+          letter-spacing: -0.7px;
+          position: relative;
+        }
+        .p {
+          margin: 8px 0 0;
+          color: rgba(255, 255, 255, 0.70);
+          font-size: 13px;
+          line-height: 1.55;
+          position: relative;
+        }
+
+        .hint {
+          margin-top: 12px;
+          border-radius: 16px;
+          border: 1px solid rgba(255, 255, 255, 0.14);
+          background: rgba(0, 0, 0, 0.22);
+          color: rgba(255, 255, 255, 0.88);
+          padding: 12px;
+          font-weight: 850;
+          font-size: 13px;
+          line-height: 1.35;
+          position: relative;
+        }
+
+        .error {
+          margin-top: 12px;
+          border-radius: 16px;
+          border: 1px solid rgba(239, 68, 68, 0.35);
+          background: rgba(239, 68, 68, 0.10);
+          color: rgba(254, 202, 202, 0.95);
+          padding: 12px;
+          font-weight: 850;
+          font-size: 13px;
+          line-height: 1.35;
+          position: relative;
+        }
+        .ok {
+          margin-top: 12px;
+          border-radius: 16px;
+          border: 1px solid rgba(34, 197, 94, 0.25);
+          background: rgba(34, 197, 94, 0.08);
+          color: rgba(220, 252, 231, 0.95);
+          padding: 12px;
+          font-weight: 850;
+          font-size: 13px;
+          line-height: 1.35;
+          position: relative;
+        }
+
+        .orRow {
+          margin: 14px 0;
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          position: relative;
+        }
+        .line {
+          height: 1px;
+          flex: 1;
+          background: rgba(255, 255, 255, 0.10);
+        }
+        .or {
+          font-size: 12px;
+          color: rgba(255, 255, 255, 0.55);
+          font-weight: 850;
+        }
+
+        .form {
+          display: grid;
+          gap: 12px;
+          margin-top: 6px;
+          position: relative;
+        }
+        .label {
+          display: grid;
+          gap: 6px;
+          font-size: 12px;
+          font-weight: 900;
+          color: rgba(255, 255, 255, 0.82);
+        }
+        .input {
+          width: 100%;
+          border-radius: 14px;
+          border: 1px solid rgba(255, 255, 255, 0.12);
+          background: rgba(0, 0, 0, 0.26);
+          padding: 11px 12px;
+          color: #fff;
+          outline: none;
+          font-size: 14px;
+          transition: border-color 0.15s ease, background 0.15s ease;
+        }
+        .input:focus {
+          border-color: rgba(138, 180, 255, 0.35);
+          background: rgba(0, 0, 0, 0.32);
+        }
+        .input::placeholder {
+          color: rgba(255, 255, 255, 0.38);
+        }
+
         .bottomLinks {
           margin-top: 14px;
           display: flex;
           justify-content: space-between;
           gap: 12px;
           font-size: 13px;
+          position: relative;
         }
         .bottomLinks :global(a) {
-          color: rgba(255, 255, 255, 0.7);
+          color: rgba(255, 255, 255, 0.72);
           text-decoration: none;
           font-weight: 850;
         }
+        .bottomLinks :global(a:hover) {
+          color: #fff;
+        }
+
         .legalLinks {
           margin-top: 12px;
           display: flex;
@@ -435,19 +557,41 @@ function SignupInner() {
           justify-content: center;
           gap: 8px;
           font-size: 12px;
-          opacity: 0.9;
+          position: relative;
         }
         .legalLinks :global(a) {
           color: rgba(255, 255, 255, 0.65);
           text-decoration: none;
           font-weight: 850;
         }
+        .legalLinks :global(a:hover) {
+          color: #fff;
+        }
         .dot {
           opacity: 0.35;
           font-weight: 900;
         }
+
+        .fine {
+          font-size: 12px;
+          color: rgba(255, 255, 255, 0.55);
+          text-align: center;
+          max-width: 520px;
+        }
+        .fine :global(a) {
+          color: rgba(255, 255, 255, 0.72);
+          text-decoration: none;
+          font-weight: 850;
+        }
+        .fine :global(a:hover) {
+          color: #fff;
+        }
+
         .footerWrap {
-          padding: 0 2px 8px;
+          width: 100%;
+          max-width: 1120px;
+          margin: 0 auto;
+          padding: 10px 18px 22px;
         }
       `}</style>
     </main>
