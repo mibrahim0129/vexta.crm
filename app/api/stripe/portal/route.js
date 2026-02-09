@@ -40,6 +40,9 @@ export async function POST(req) {
       return NextResponse.json({ error: "Missing Authorization token" }, { status: 401 });
     }
 
+    const body = await req.json().catch(() => ({}));
+    const returnTo = body?.returnTo || "/dashboard/settings?billing=portal_return";
+
     const admin = supabaseAdmin();
 
     // Verify user from token
@@ -50,7 +53,7 @@ export async function POST(req) {
       return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
     }
 
-    // IMPORTANT: avoid maybeSingle() if duplicates exist; always take latest row
+    // Take latest row (in case duplicates exist)
     const { data: rows, error: rowErr } = await admin
       .from("subscriptions")
       .select("stripe_customer_id, created_at")
@@ -74,7 +77,7 @@ export async function POST(req) {
       });
       stripeCustomerId = customer.id;
 
-      // Store for future portal/checkout usage
+      // Store placeholder (NO FREE TIER → access stays false)
       await admin
         .from("subscriptions")
         .upsert(
@@ -82,14 +85,22 @@ export async function POST(req) {
             user_id: user.id,
             stripe_customer_id: stripeCustomerId,
             status: "incomplete",
+            access: false,
+            plan: "None",
+            price_id: null,
           },
           { onConflict: "user_id" }
         );
     }
 
+    const appUrl = getAppUrl();
+    const safeReturn = String(returnTo || "/dashboard/settings").startsWith("/")
+      ? String(returnTo)
+      : `/${String(returnTo)}`;
+
     const portal = await stripe.billingPortal.sessions.create({
       customer: stripeCustomerId,
-      return_url: `${getAppUrl()}/dashboard/settings?billing=portal_return`,
+      return_url: `${appUrl}${safeReturn}`,
     });
 
     return NextResponse.json({ url: portal.url });
