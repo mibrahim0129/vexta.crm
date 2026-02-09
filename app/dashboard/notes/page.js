@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { supabaseBrowser } from "@/lib/supabase/browser";
 
-// ✅ Soft gating
+// ✅ Subscription gating
 import { useSubscription } from "@/lib/subscription/useSubscription";
 import UpgradeBanner from "@/components/UpgradeBanner";
 
@@ -25,12 +25,9 @@ export default function NotesPage() {
   const sb = useMemo(() => supabaseBrowser(), []);
   const mountedRef = useRef(false);
 
-  // ✅ Beta Mode toggle
-  const isBeta = process.env.NEXT_PUBLIC_BETA_MODE === "true";
-
-  // ✅ Subscription (soft gating)
+  // ✅ Subscription gating (no beta bypass)
   const { loading: subLoading, access, plan } = useSubscription();
-  const canWrite = isBeta ? true : !subLoading && !!access;
+  const canWrite = !subLoading && !!access;
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -67,8 +64,6 @@ export default function NotesPage() {
   }
 
   function requireWriteOrWarn(message) {
-    if (isBeta) return true;
-
     if (subLoading) {
       setErr("Checking your plan… please try again.");
       return false;
@@ -80,10 +75,11 @@ export default function NotesPage() {
     return true;
   }
 
-  async function loadContacts() {
+  async function loadContactsWithSession(session) {
     const { data, error } = await sb
       .from("contacts")
-      .select("id, first_name, last_name, created_at")
+      .select("id, first_name, last_name, created_at, user_id")
+      .eq("user_id", session.user.id) // ✅ RLS-safe
       .order("created_at", { ascending: false });
 
     if (error) throw error;
@@ -98,10 +94,11 @@ export default function NotesPage() {
     });
   }
 
-  async function loadDeals(contactIdForDeals) {
+  async function loadDealsWithSession(session, contactIdForDeals) {
     let q = sb
       .from("deals")
-      .select("id, title, contact_id, created_at")
+      .select("id, title, contact_id, created_at, user_id")
+      .eq("user_id", session.user.id) // ✅ RLS-safe
       .order("created_at", { ascending: false });
 
     if (contactIdForDeals && contactIdForDeals !== "all") {
@@ -114,10 +111,7 @@ export default function NotesPage() {
     setDeals(Array.isArray(data) ? data : []);
   }
 
-  async function loadNotes() {
-    const session = await requireSession();
-    if (!session) return;
-
+  async function loadNotesWithSession(session) {
     setErr("");
 
     try {
@@ -135,6 +129,7 @@ export default function NotesPage() {
           deals:deal_id ( id, title )
         `
         )
+        .eq("user_id", session.user.id) // ✅ critical for RLS + privacy
         .order("created_at", { ascending: false });
 
       if (filterContactId !== "all") {
@@ -159,9 +154,9 @@ export default function NotesPage() {
       const session = await requireSession();
       if (!session) return;
 
-      await loadContacts();
-      await loadDeals(filterContactId === "all" ? form.contact_id : filterContactId);
-      await loadNotes();
+      await loadContactsWithSession(session);
+      await loadDealsWithSession(session, filterContactId === "all" ? form.contact_id : filterContactId);
+      await loadNotesWithSession(session);
     } catch (e) {
       console.error(e);
       setErr(e?.message || "Failed to load data");
@@ -215,9 +210,9 @@ export default function NotesPage() {
 
       setNotes((prev) => [data, ...prev]);
       setForm((p) => ({ ...p, body: "" })); // keep contact selection
-    } catch (e) {
-      console.error(e);
-      setErr(e?.message || "Failed to add note");
+    } catch (e2) {
+      console.error(e2);
+      setErr(e2?.message || "Failed to add note");
     } finally {
       setSaving(false);
     }
@@ -320,8 +315,11 @@ export default function NotesPage() {
   // When filter changes, reload notes + deals list for that contact
   useEffect(() => {
     (async () => {
-      await loadDeals(filterContactId === "all" ? form.contact_id : filterContactId);
-      await loadNotes();
+      const session = await requireSession();
+      if (!session) return;
+
+      await loadDealsWithSession(session, filterContactId === "all" ? form.contact_id : filterContactId);
+      await loadNotesWithSession(session);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filterContactId]);
@@ -330,7 +328,10 @@ export default function NotesPage() {
   useEffect(() => {
     if (!form.contact_id) return;
     (async () => {
-      await loadDeals(form.contact_id);
+      const session = await requireSession();
+      if (!session) return;
+
+      await loadDealsWithSession(session, form.contact_id);
       setForm((p) => ({ ...p, deal_id: "" }));
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -347,7 +348,13 @@ export default function NotesPage() {
       channel = sb.channel("notes-rt");
       channel
         .on("postgres_changes", { event: "*", schema: "public", table: "notes" }, () => {
-          if (mountedRef.current) loadNotes();
+          if (mountedRef.current) {
+            (async () => {
+              const session = await requireSession();
+              if (!session) return;
+              await loadNotesWithSession(session);
+            })();
+          }
         })
         .on("postgres_changes", { event: "*", schema: "public", table: "contacts" }, () => {
           if (mountedRef.current) loadAll();
@@ -367,8 +374,8 @@ export default function NotesPage() {
   }, []);
 
   const hasContacts = contacts.length > 0;
-  const canCreate = hasContacts && canWrite && !subLoading;
   const disableWrites = subLoading || !canWrite;
+  const canCreate = hasContacts && canWrite && !subLoading;
 
   const normalizedQuery = String(query || "").trim().toLowerCase();
   const shownNotes = notes.filter((n) => {
@@ -387,7 +394,7 @@ export default function NotesPage() {
             <h1 style={styles.h1}>Notes</h1>
             <span style={styles.pill}>Realtime: {rtStatus}</span>
             <span style={styles.pillMuted}>
-              {isBeta ? "Beta Mode" : subLoading ? "Checking plan…" : `Plan: ${plan || "Free"}`}
+              {subLoading ? "Checking plan…" : access ? `Plan: ${plan || "Active"}` : "Plan required"}
             </span>
             <span style={styles.pillMuted}>{loading ? "Loading…" : `${shownNotes.length} shown`}</span>
           </div>
@@ -401,8 +408,8 @@ export default function NotesPage() {
         </div>
       </div>
 
-      {/* ✅ Upgrade banner (disabled in beta) */}
-      {!isBeta && !subLoading && !access ? (
+      {/* ✅ Upgrade banner */}
+      {!subLoading && !access ? (
         <div style={{ marginTop: 14 }}>
           <UpgradeBanner
             title="Upgrade to add notes"
@@ -446,7 +453,7 @@ export default function NotesPage() {
                 .
               </>
             ) : disableWrites ? (
-              isBeta ? "Beta mode enabled." : "Writes are disabled until upgrade."
+              "Writes are disabled until upgrade."
             ) : (
               "Attach a note to a contact (and optionally a deal)."
             )}
@@ -513,7 +520,7 @@ export default function NotesPage() {
                   : {}),
               }}
             >
-              {isBeta ? (saving ? "Saving..." : "Add Note") : subLoading ? "Checking plan…" : saving ? "Saving..." : "Add Note"}
+              {subLoading ? "Checking plan…" : saving ? "Saving..." : "Add Note"}
             </button>
 
             <div style={{ fontSize: 12, opacity: 0.7 }}>Tip: Use notes as your running log — you’ll close faster.</div>
@@ -568,20 +575,20 @@ export default function NotesPage() {
                       <span style={styles.time}>{fmtDate(n.created_at)}</span>
 
                       <button
-                        onClick={() => openEdit(n)}
+                        onClick={() => (disableWrites ? null : openEdit(n))}
                         style={{
                           ...styles.btnMini,
                           ...(disableWrites ? { opacity: 0.55, cursor: "not-allowed" } : {}),
                         }}
                         disabled={disableWrites}
                         type="button"
-                        title={disableWrites ? (isBeta ? "Edit note" : "Upgrade required") : "Edit note"}
+                        title={disableWrites ? "Upgrade required" : "Edit note"}
                       >
                         Edit
                       </button>
 
                       <button
-                        onClick={() => deleteNote(n.id)}
+                        onClick={() => (disableWrites ? null : deleteNote(n.id))}
                         style={{
                           ...styles.btnMini,
                           ...styles.btnMiniDanger,
@@ -589,7 +596,7 @@ export default function NotesPage() {
                         }}
                         disabled={disableWrites}
                         type="button"
-                        title={disableWrites ? (isBeta ? "Delete note" : "Upgrade required") : "Delete note"}
+                        title={disableWrites ? "Upgrade required" : "Delete note"}
                       >
                         Delete
                       </button>
@@ -617,10 +624,7 @@ export default function NotesPage() {
 
             <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
               <div style={{ fontSize: 12, opacity: 0.85, fontWeight: 900 }}>
-                Contact:{" "}
-                <span style={{ opacity: 0.9 }}>
-                  {editing.contact_id ? safeName(editing.contacts) : "Unknown"}
-                </span>
+                Contact: <span style={{ opacity: 0.9 }}>{editing.contact_id ? safeName(editing.contacts) : "Unknown"}</span>
               </div>
 
               <select
@@ -648,12 +652,22 @@ export default function NotesPage() {
                 disabled={saving}
               />
 
+              {!subLoading && !access ? (
+                <div style={{ ...styles.alert, marginTop: 0 }}>Upgrade required to save changes.</div>
+              ) : null}
+
               <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 6 }}>
                 <button onClick={closeEdit} type="button" style={styles.btnGhost} disabled={saving}>
                   Cancel
                 </button>
-                <button onClick={saveEdit} type="button" style={styles.btnPrimary} disabled={saving}>
-                  {saving ? "Saving..." : "Save Changes"}
+                <button
+                  onClick={saveEdit}
+                  type="button"
+                  style={{ ...styles.btnPrimary, ...(disableWrites ? { opacity: 0.55, cursor: "not-allowed" } : {}) }}
+                  disabled={saving || disableWrites}
+                  title={disableWrites ? "Upgrade required" : "Save changes"}
+                >
+                  {saving ? "Saving..." : subLoading ? "Checking plan…" : "Save Changes"}
                 </button>
               </div>
             </div>
