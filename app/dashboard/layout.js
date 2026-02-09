@@ -2,30 +2,11 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { supabaseBrowser } from "@/lib/supabase/browser";
 
-function parseCsv(value) {
-  return (value || "")
-    .split(",")
-    .map((s) => s.trim().toLowerCase())
-    .filter(Boolean);
-}
-
-// NOTE: kept for backward compatibility (not relied on anymore for gating)
-function isAllowedEmail(email) {
-  const e = (email || "").toLowerCase();
-  const allow = parseCsv(process.env.NEXT_PUBLIC_BETA_ALLOWLIST);
-  const admins = parseCsv(process.env.NEXT_PUBLIC_ADMIN_EMAILS);
-  return admins.includes(e) || allow.includes(e);
-}
-
-// ✅ Runtime check (server truth)
-function isAllowedEmailFromLists(email, allowlist, admins) {
-  const e = (email || "").toLowerCase();
-  if (!e) return false;
-  return (admins || []).includes(e) || (allowlist || []).includes(e);
-}
+// ✅ Stripe subscription gating (single source of truth)
+import { useSubscription } from "@/lib/subscription/useSubscription";
 
 function pct(done, total) {
   if (!total) return 0;
@@ -49,6 +30,9 @@ export default function DashboardLayout({ children }) {
   const [isMobile, setIsMobile] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
 
+  // ✅ Subscription
+  const { loading: subLoading, access, plan } = useSubscription();
+
   // ✅ Getting Started (dashboard only)
   const isOverview = pathname === "/dashboard";
   const [gsLoading, setGsLoading] = useState(false);
@@ -60,9 +44,6 @@ export default function DashboardLayout({ children }) {
     tasks: 0,
     events: 0,
   });
-
-  // Cache runtime config in-memory for this tab
-  const betaCfgRef = useRef({ ready: false, betaOpen: false, allowlist: [], admins: [] });
 
   useEffect(() => {
     const onResize = () => setIsMobile(window.innerWidth < 960);
@@ -99,73 +80,16 @@ export default function DashboardLayout({ children }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [mobileOpen]);
 
+  // ✅ Auth bootstrap (NO beta gate)
   useEffect(() => {
     let alive = true;
     let unsubscribeAuth = null;
-    let kicked = false;
-
-    async function kickToBetaClosed(message) {
-      if (kicked) return;
-      kicked = true;
-
-      try {
-        setGateError(message || "You are not on the beta allowlist.");
-        setAuthReady(false);
-
-        // Hard kick: sign out so they can't "stick" in the dashboard after OAuth
-        await sb.auth.signOut();
-      } catch {
-        // ignore
-      } finally {
-        // Use replace so back button doesn't re-enter dashboard
-        router.replace("/beta-closed");
-      }
-    }
-
-    async function loadBetaConfig() {
-      if (betaCfgRef.current.ready) return betaCfgRef.current;
-
-      const res = await fetch("/api/beta-config", { cache: "no-store" });
-      const json = await res.json();
-
-      betaCfgRef.current = {
-        ready: true,
-        betaOpen: !!json?.betaOpen,
-        allowlist: Array.isArray(json?.allowlist) ? json.allowlist : [],
-        admins: Array.isArray(json?.admins) ? json.admins : [],
-      };
-
-      return betaCfgRef.current;
-    }
-
-    async function enforceBetaGate(userEmail) {
-      const cfg = await loadBetaConfig();
-      if (!alive) return false;
-
-      // If beta is closed => only allow allowlist/admin
-      if (!cfg.betaOpen) {
-        const ok = isAllowedEmailFromLists(userEmail, cfg.allowlist, cfg.admins);
-
-        // Fallback to client env (in case API route isn't reachable for some reason)
-        const fallbackOk = isAllowedEmail(userEmail);
-
-        if (!ok && !fallbackOk) {
-          await kickToBetaClosed("Beta access is closed for this email.");
-          return false;
-        }
-      }
-
-      return true;
-    }
 
     async function boot() {
       try {
         setGateError("");
 
-        // Prime config early (prevents stale NEXT_PUBLIC issues)
-        await loadBetaConfig();
-
-        // 1) Quick check
+        // 1) Quick session check
         const { data } = await sb.auth.getSession();
         if (!alive) return;
 
@@ -173,15 +97,11 @@ export default function DashboardLayout({ children }) {
           const session = data.session;
           const userEmail = session.user?.email || "";
           setEmail(userEmail);
-
-          const ok = await enforceBetaGate(userEmail);
-          if (!ok) return;
-
           setAuthReady(true);
           return;
         }
 
-        // 2) Listen (OAuth callback may still be finalizing session storage)
+        // 2) Listen for auth changes (OAuth callback may still be finalizing)
         const { data: sub } = sb.auth.onAuthStateChange(async (_event, session) => {
           if (!alive) return;
 
@@ -189,9 +109,6 @@ export default function DashboardLayout({ children }) {
           setEmail(userEmail);
 
           if (session) {
-            const ok = await enforceBetaGate(userEmail);
-            if (!ok) return;
-
             setAuthReady(true);
             return;
           }
@@ -212,10 +129,6 @@ export default function DashboardLayout({ children }) {
               const session = again.session;
               const userEmail = session.user?.email || "";
               setEmail(userEmail);
-
-              const ok = await enforceBetaGate(userEmail);
-              if (!ok) return;
-
               setAuthReady(true);
               return;
             }
@@ -249,6 +162,21 @@ export default function DashboardLayout({ children }) {
       router.refresh();
     }
   }
+
+  // ✅ Subscription enforcement:
+  // If authenticated but not subscribed -> force pricing (no free tier)
+  useEffect(() => {
+    if (!authReady) return;
+    if (subLoading) return;
+
+    // Allow pricing / billing / account routes without subscription
+    const PUBLIC_OK = ["/pricing", "/billing", "/account", "/support"];
+    const isPublicOk = PUBLIC_OK.some((p) => (pathname || "").startsWith(p));
+
+    if (!access && !isPublicOk) {
+      router.replace("/pricing?reason=subscribe");
+    }
+  }, [authReady, subLoading, access, pathname, router]);
 
   const nav = [
     { href: "/dashboard", label: "Overview" },
@@ -346,10 +274,10 @@ export default function DashboardLayout({ children }) {
   const doneCount = steps.filter((s) => s.done).length;
   const totalCount = steps.length;
   const progress = pct(doneCount, totalCount);
-  const showGettingStarted = isOverview && (doneCount < totalCount);
+  const showGettingStarted = isOverview && doneCount < totalCount;
 
-  // ✅ Only block UI until auth is confirmed (NO subscription gate here)
-  if (!authReady) {
+  // ✅ Gate screen while auth is unknown OR subscription status is loading (prevents UI flash)
+  if (!authReady || subLoading) {
     return (
       <div style={styles.gate}>
         <div style={styles.gateCard}>
@@ -364,13 +292,18 @@ export default function DashboardLayout({ children }) {
             </>
           ) : (
             <div style={{ marginTop: 10, opacity: 0.7, fontWeight: 800, fontSize: 13 }}>
-              Signing you in and preparing your workspace.
+              Preparing your workspace.
             </div>
           )}
         </div>
       </div>
     );
   }
+
+  // ✅ Hard paywall: if no access, redirect effect will fire; return null to avoid flash.
+  const PUBLIC_OK = ["/pricing", "/billing", "/account", "/support"];
+  const isPublicOk = PUBLIC_OK.some((p) => (pathname || "").startsWith(p));
+  if (!access && !isPublicOk) return null;
 
   function Sidebar({ mode }) {
     const isDrawer = mode === "drawer";
@@ -400,6 +333,9 @@ export default function DashboardLayout({ children }) {
             <div style={{ minWidth: 0 }}>
               <div style={styles.brandName}>Vexta</div>
               <div style={styles.brandSub}>CRM Dashboard</div>
+              <div style={{ marginTop: 4, fontSize: 12, opacity: 0.7, fontWeight: 850 }}>
+                {access ? `Plan: ${plan || "Active"}` : "No subscription"}
+              </div>
             </div>
           ) : null}
 
