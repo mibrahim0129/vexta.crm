@@ -19,6 +19,23 @@ function toIsoFromUnix(unixSeconds) {
   return unixSeconds ? new Date(unixSeconds * 1000).toISOString() : null;
 }
 
+// ✅ Define which Stripe statuses count as access
+function computeAccessFromStatus(status) {
+  const s = String(status || "").toLowerCase();
+  return s === "active" || s === "trialing";
+}
+
+// ✅ Map priceId => plan label (adjust to your price IDs or envs)
+function planFromPriceId(priceId) {
+  const monthly = process.env.STRIPE_PRICE_MONTHLY;
+  const yearly = process.env.STRIPE_PRICE_YEARLY;
+
+  if (!priceId) return "Paid";
+  if (monthly && priceId === monthly) return "Monthly";
+  if (yearly && priceId === yearly) return "Yearly";
+  return "Paid";
+}
+
 async function upsertSubscriptionRow({
   userId,
   stripeCustomerId,
@@ -29,21 +46,53 @@ async function upsertSubscriptionRow({
 }) {
   const admin = supabaseAdmin();
 
-  // IMPORTANT: This assumes you have (or will add) a unique constraint on subscriptions.user_id.
-  // If you don't, Supabase upsert will not behave like you expect.
-  await admin
+  const access = computeAccessFromStatus(status);
+  const plan = planFromPriceId(priceId);
+
+  const { error } = await admin
     .from("subscriptions")
     .upsert(
       {
         user_id: userId,
         stripe_customer_id: stripeCustomerId,
         stripe_subscription_id: stripeSubscriptionId,
-        status,
+        status: String(status || "unknown"),
+        access,
+        plan,
         price_id: priceId,
         current_period_end: currentPeriodEnd,
       },
       { onConflict: "user_id" }
     );
+
+  if (error) throw error;
+}
+
+async function updateByCustomerId({
+  stripeCustomerId,
+  stripeSubscriptionId,
+  status,
+  priceId,
+  currentPeriodEnd,
+}) {
+  const admin = supabaseAdmin();
+
+  const access = computeAccessFromStatus(status);
+  const plan = planFromPriceId(priceId);
+
+  const { error } = await admin
+    .from("subscriptions")
+    .update({
+      stripe_subscription_id: stripeSubscriptionId,
+      status: String(status || "unknown"),
+      access,
+      plan,
+      price_id: priceId,
+      current_period_end: currentPeriodEnd,
+    })
+    .eq("stripe_customer_id", stripeCustomerId);
+
+  if (error) throw error;
 }
 
 async function handleSubscriptionObject(sub) {
@@ -54,7 +103,7 @@ async function handleSubscriptionObject(sub) {
   const currentPeriodEnd = toIsoFromUnix(sub.current_period_end);
 
   // Prefer metadata mapping
-  const userIdFromMeta = sub.metadata?.supabase_user_id || null;
+  const userIdFromMeta = sub.metadata?.supabase_user_id || sub.metadata?.supabase_uid || null;
 
   if (userIdFromMeta) {
     await upsertSubscriptionRow({
@@ -68,22 +117,18 @@ async function handleSubscriptionObject(sub) {
     return;
   }
 
-  // Fallback: If metadata is missing, best effort update by customer id
-  // NOTE: This is less reliable than checkout.session.completed (handled below).
-  const admin = supabaseAdmin();
-  await admin
-    .from("subscriptions")
-    .update({
-      stripe_subscription_id: stripeSubscriptionId,
-      status,
-      price_id: priceId,
-      current_period_end: currentPeriodEnd,
-    })
-    .eq("stripe_customer_id", stripeCustomerId);
+  // Fallback: best-effort update by customer id
+  await updateByCustomerId({
+    stripeCustomerId,
+    stripeSubscriptionId,
+    status,
+    priceId,
+    currentPeriodEnd,
+  });
 }
 
 async function handleCheckoutSessionCompleted(session) {
-  // This event is the best way to link user ↔ customer ↔ subscription
+  // ✅ This is the best event to link user ↔ customer ↔ subscription
   const userId =
     session?.metadata?.supabase_user_id ||
     session?.subscription_data?.metadata?.supabase_user_id ||
@@ -92,12 +137,9 @@ async function handleCheckoutSessionCompleted(session) {
   const stripeCustomerId = String(session.customer || "");
   const stripeSubscriptionId = String(session.subscription || "");
 
-  if (!userId) {
-    // No user mapping → nothing safe to upsert by user_id
-    return;
-  }
+  if (!userId || !stripeSubscriptionId) return;
 
-  // Fetch full subscription to get status, price, period end
+  // Fetch full subscription (status, items, period end)
   const sub = await stripe.subscriptions.retrieve(stripeSubscriptionId);
 
   const status = sub.status || "incomplete";
@@ -118,6 +160,7 @@ export async function POST(req) {
   try {
     const sig = req.headers.get("stripe-signature");
     const secret = process.env.STRIPE_WEBHOOK_SECRET;
+
     if (!sig || !secret) {
       return NextResponse.json(
         { error: "Missing stripe-signature or STRIPE_WEBHOOK_SECRET" },
@@ -134,7 +177,7 @@ export async function POST(req) {
       return NextResponse.json({ received: true });
     }
 
-    // 2) Subscription lifecycle as backup (created/updated/deleted)
+    // 2) Subscription lifecycle events
     if (
       event.type === "customer.subscription.created" ||
       event.type === "customer.subscription.updated" ||
@@ -159,4 +202,3 @@ export async function POST(req) {
     return NextResponse.json({ error: e?.message || "Webhook error" }, { status: 400 });
   }
 }
-
