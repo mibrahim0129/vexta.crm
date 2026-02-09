@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { supabaseBrowser } from "@/lib/supabase/browser";
 
-// ✅ Soft gating
+// ✅ Subscription gating (no free tier)
 import { useSubscription } from "@/lib/subscription/useSubscription";
 import UpgradeBanner from "@/components/UpgradeBanner";
 
@@ -12,14 +12,9 @@ export default function CalendarPage() {
   const sb = useMemo(() => supabaseBrowser(), []);
   const mountedRef = useRef(false);
 
-  // ✅ Beta Mode toggle
-  const isBeta = process.env.NEXT_PUBLIC_BETA_MODE === "true";
-
-  // ✅ Subscription (soft gating)
+  // ✅ Subscription (hard gating for writes)
   const { loading: subLoading, access, plan } = useSubscription();
-
-  // ✅ In beta: everything is enabled
-  const canWrite = isBeta ? true : !subLoading && !!access;
+  const canWrite = !subLoading && !!access;
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -69,8 +64,6 @@ export default function CalendarPage() {
   }
 
   function requireWriteOrWarn(message) {
-    if (isBeta) return true;
-
     if (subLoading) {
       setErr("Checking your plan… please try again.");
       return false;
@@ -171,7 +164,7 @@ export default function CalendarPage() {
     const { data, error } = await sb
       .from("contacts")
       .select("id, first_name, last_name, created_at, user_id")
-      .eq("user_id", session.user.id) // ✅ RLS-safe
+      .eq("user_id", session.user.id)
       .order("created_at", { ascending: false });
 
     if (error) throw error;
@@ -189,7 +182,7 @@ export default function CalendarPage() {
     let q = sb
       .from("deals")
       .select("id, title, contact_id, created_at, user_id")
-      .eq("user_id", session.user.id) // ✅ RLS-safe
+      .eq("user_id", session.user.id)
       .order("created_at", { ascending: false });
 
     if (contactIdForDeals && contactIdForDeals !== "all") {
@@ -225,7 +218,7 @@ export default function CalendarPage() {
           deals:deal_id ( id, title )
         `
       )
-      .eq("user_id", session.user.id) // ✅ critical
+      .eq("user_id", session.user.id)
       .order("start_at", { ascending: true })
       .limit(500);
 
@@ -337,7 +330,7 @@ export default function CalendarPage() {
       .from("calendar_events")
       .update(patch)
       .eq("id", eventId)
-      .eq("user_id", session.user.id) // ✅ critical for RLS
+      .eq("user_id", session.user.id)
       .select(
         `
           id,
@@ -555,8 +548,7 @@ export default function CalendarPage() {
   const hasContacts = contacts.length > 0;
   const canCreate = hasContacts && canWrite;
 
-  // ✅ In beta: never disable writes because of subscription
-  const disableWrites = isBeta ? false : subLoading || !canWrite;
+  const disableWrites = subLoading || !canWrite;
 
   return (
     <div>
@@ -566,7 +558,7 @@ export default function CalendarPage() {
             <h1 style={styles.h1}>Calendar</h1>
 
             <span style={styles.pill}>
-              {isBeta ? "Beta Mode (all features unlocked)" : subLoading ? "Checking plan…" : `Plan: ${plan || "Free"}`}
+              {subLoading ? "Checking plan…" : access ? `Plan: ${plan || "Active"}` : "Plan required"}
             </span>
 
             <span style={styles.pill}>
@@ -586,8 +578,8 @@ export default function CalendarPage() {
         </div>
       </div>
 
-      {/* ✅ Upgrade banner (disabled in beta) */}
-      {!isBeta && !subLoading && !access ? (
+      {/* ✅ Upgrade banner */}
+      {!subLoading && !access ? (
         <div style={{ marginTop: 14 }}>
           <UpgradeBanner
             title="Upgrade to use calendar"
@@ -602,9 +594,7 @@ export default function CalendarPage() {
       <div style={styles.card}>
         <div style={styles.cardTop}>
           <h2 style={styles.h2}>Add Event</h2>
-          {!isBeta && !subLoading && !access ? (
-            <div style={{ fontSize: 12, opacity: 0.8 }}>Writes are disabled until upgrade.</div>
-          ) : null}
+          {!subLoading && !access ? <div style={{ fontSize: 12, opacity: 0.8 }}>Writes are disabled until upgrade.</div> : null}
         </div>
 
         <form onSubmit={addEvent} style={styles.form}>
@@ -705,7 +695,7 @@ export default function CalendarPage() {
                 : {}),
             }}
           >
-            {isBeta ? (saving ? "Saving..." : "Add Event") : subLoading ? "Checking plan…" : saving ? "Saving..." : "Add Event"}
+            {subLoading ? "Checking plan…" : saving ? "Saving..." : "Add Event"}
           </button>
 
           {!hasContacts ? (
@@ -828,27 +818,27 @@ export default function CalendarPage() {
 
                             <div style={{ display: "grid", gap: 10 }}>
                               <button
-                                onClick={() => openEdit(ev)}
+                                onClick={() => (disableWrites ? null : openEdit(ev))}
                                 style={{
                                   ...styles.btnGhost,
                                   ...(disableWrites ? { opacity: 0.55, cursor: "not-allowed" } : {}),
                                 }}
                                 type="button"
                                 disabled={disableWrites}
-                                title={disableWrites ? (isBeta ? "Edit event" : "Upgrade required") : "Edit event"}
+                                title={disableWrites ? "Upgrade required" : "Edit event"}
                               >
                                 Edit
                               </button>
 
                               <button
-                                onClick={() => deleteEvent(ev.id)}
+                                onClick={() => (disableWrites ? null : deleteEvent(ev.id))}
                                 style={{
                                   ...styles.btnDanger,
                                   ...(disableWrites ? { opacity: 0.55, cursor: "not-allowed" } : {}),
                                 }}
                                 type="button"
                                 disabled={disableWrites}
-                                title={isBeta ? "Delete event" : subLoading ? "Checking plan…" : !canWrite ? "Upgrade required" : "Delete event"}
+                                title={disableWrites ? (subLoading ? "Checking plan…" : "Upgrade required") : "Delete event"}
                               >
                                 Delete
                               </button>
@@ -957,12 +947,27 @@ export default function CalendarPage() {
                 disabled={saving}
               />
 
+              {!subLoading && !access ? (
+                <div style={{ ...styles.alert, marginTop: 0 }}>
+                  Upgrade required to save changes. You can view events, but editing requires an active plan.
+                </div>
+              ) : null}
+
               <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 6 }}>
                 <button onClick={closeEdit} type="button" style={styles.btnGhost} disabled={saving}>
                   Cancel
                 </button>
-                <button onClick={saveEdit} type="button" style={styles.btnPrimary} disabled={saving}>
-                  {saving ? "Saving..." : "Save Changes"}
+                <button
+                  onClick={saveEdit}
+                  type="button"
+                  style={{
+                    ...styles.btnPrimary,
+                    ...(disableWrites ? { opacity: 0.55, cursor: "not-allowed" } : {}),
+                  }}
+                  disabled={saving || disableWrites}
+                  title={disableWrites ? "Upgrade required" : "Save changes"}
+                >
+                  {saving ? "Saving..." : subLoading ? "Checking plan…" : "Save Changes"}
                 </button>
               </div>
             </div>
