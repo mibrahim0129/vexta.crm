@@ -3,8 +3,8 @@ import { NextResponse } from "next/server";
 import Stripe from "stripe";
 import { createClient } from "@supabase/supabase-js";
 
-const PRICE_MONTHLY = "price_1SuOMyA0KYJ0htSxcZPG0Vkg"; // 7-day trial
-const PRICE_YEARLY = "price_1SuOMyA0KYJ0htSxF9os18YO"; // no trial
+const PRICE_MONTHLY = "price_1SuOMyA0KYJ0htSxcZPG0Vkg";
+const PRICE_YEARLY = "price_1SuOMyA0KYJ0htSxF9os18YO";
 
 function getAppUrl() {
   return (
@@ -61,7 +61,7 @@ export async function POST(req) {
     const stripe = getStripe();
     const appUrl = getAppUrl();
 
-    // Fetch the LATEST subscription row for this user (prevents grabbing wrong/old row)
+    // Fetch the latest subscription row for this user
     const { data: subs, error: subsErr } = await admin
       .from("subscriptions")
       .select("status, stripe_customer_id, stripe_subscription_id, created_at")
@@ -75,9 +75,10 @@ export async function POST(req) {
 
     const latest = subs?.[0] || null;
 
-    // If they already have access, do NOT create another subscription — send to billing portal
-    const okStatuses = new Set(["active", "trialing", "past_due"]);
-    if (latest?.status && okStatuses.has(latest.status) && latest?.stripe_customer_id) {
+    // If they already have an ACTIVE subscription, do not create another one — send to billing portal
+    // (Past_due is NOT treated as access in-app; user should fix payment in portal.)
+    const okStatuses = new Set(["active", "trialing"]);
+    if (latest?.status && okStatuses.has(String(latest.status).toLowerCase()) && latest?.stripe_customer_id) {
       const portal = await stripe.billingPortal.sessions.create({
         customer: latest.stripe_customer_id,
         return_url: `${appUrl}/dashboard/settings?billing=portal_return`,
@@ -96,15 +97,12 @@ export async function POST(req) {
       stripeCustomerId = customer.id;
 
       // Store customer id so future checkouts/portal work.
-      // NOTE: This is a pragmatic approach with your current schema.
-      // Long-term, we should move stripe_customer_id to a dedicated "customers" table.
       await admin
         .from("subscriptions")
         .upsert(
           {
             user_id: user.id,
             stripe_customer_id: stripeCustomerId,
-            // Do NOT force a fake "subscription" state here; just keep a placeholder.
             status: latest?.status || "incomplete",
             price_id: priceId,
           },
@@ -116,9 +114,11 @@ export async function POST(req) {
       mode: "subscription",
       customer: stripeCustomerId,
       line_items: [{ price: priceId, quantity: 1 }],
+
+      // ✅ Users can enter promo code (EARLYVEXTA limited to 20 in Stripe)
       allow_promotion_codes: true,
 
-      // ✅ send to a success buffer page (prevents redirect loops while webhook finalizes)
+      // ✅ success buffer page (prevents redirect loops while webhook finalizes)
       success_url: `${appUrl}/billing/success?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${appUrl}/pricing?billing=canceled`,
 
@@ -131,10 +131,8 @@ export async function POST(req) {
       },
     };
 
-    // Monthly gets 7-day trial; yearly gets none
-    if (priceId === PRICE_MONTHLY) {
-      sessionParams.subscription_data.trial_period_days = 7;
-    }
+    // ❌ No trials (you said temporarily free only via promo code)
+    // If you ever re-add trials later, do it intentionally here.
 
     const session = await stripe.checkout.sessions.create(sessionParams);
     return NextResponse.json({ url: session.url, kind: "checkout" });
