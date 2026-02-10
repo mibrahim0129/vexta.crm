@@ -2,18 +2,16 @@
 import { NextResponse } from "next/server";
 
 export function middleware(req) {
-  const betaOpen = process.env.NEXT_PUBLIC_BETA_MODE === "true";
-
-  // If beta is open, do nothing
-  if (betaOpen) return NextResponse.next();
-
-  // Beta is closed: if user isn't logged in, block dashboard routes
+  // Protect dashboard routes: require an auth cookie
+  // Supabase stores auth in cookies that start with "sb-"
   const hasSbCookie = req.cookies.getAll().some((c) => c.name.startsWith("sb-"));
+
   if (!hasSbCookie) {
-    return NextResponse.redirect(new URL("/beta-closed", req.url));
+    const url = new URL("/login", req.url);
+    url.searchParams.set("next", req.nextUrl.pathname + req.nextUrl.search);
+    return NextResponse.redirect(url);
   }
 
-  // Logged-in users will be checked for allowlist in the dashboard layout
   return NextResponse.next();
 }
 
