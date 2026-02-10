@@ -72,11 +72,11 @@ export default function AdminFeedbackPage() {
       <div style={styles.header}>
         <div>
           <h1 style={styles.h1}>Feedback Inbox</h1>
-          <p style={styles.sub}>Admin-only view of beta feedback submissions.</p>
+          <p style={styles.sub}>Admin-only view of feedback submissions.</p>
         </div>
 
         <div style={styles.headerRight}>
-          <button onClick={load} disabled={loading} style={styles.btnGhost}>
+          <button onClick={load} disabled={loading} style={styles.btnGhost} type="button">
             {loading ? "Refreshing..." : "Refresh"}
           </button>
           <Link href="/dashboard/feedback" style={styles.btnGhost}>
