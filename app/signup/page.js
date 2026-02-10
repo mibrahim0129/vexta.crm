@@ -50,9 +50,10 @@ function SignupInner() {
   const sp = useSearchParams();
   const sb = useMemo(() => supabaseBrowser(), []);
 
-  const isBeta = process.env.NEXT_PUBLIC_BETA_MODE === "true";
-  const allowlist = useMemo(() => parseAllowlist(process.env.NEXT_PUBLIC_BETA_ALLOWLIST), []);
-  const allowlistEnabled = isBeta && allowlist.size > 0;
+  // ✅ Rename beta gating to invite-only gating (no "beta" strings)
+  const inviteOnly = process.env.NEXT_PUBLIC_INVITE_ONLY === "true";
+  const allowlist = useMemo(() => parseAllowlist(process.env.NEXT_PUBLIC_INVITE_ALLOWLIST), []);
+  const allowlistEnabled = inviteOnly && allowlist.size > 0;
 
   const redirectTo = useMemo(() => {
     const r = sp.get("redirectTo") || sp.get("next");
@@ -83,7 +84,7 @@ function SignupInner() {
     }
 
     if (!isAllowedEmail(email)) {
-      setError("Vexta Beta is invite-only. This email is not on the allowlist.");
+      setError("Vexta is invite-only right now. This email is not approved yet.");
       return;
     }
 
@@ -119,8 +120,9 @@ function SignupInner() {
     setError("");
     setOk("");
 
+    // If you're in invite-only mode and using an allowlist, force email/password so the email is explicit.
     if (allowlistEnabled) {
-      setError("Vexta Beta is invite-only. Please sign up with email/password using an approved email.");
+      setError("Invite-only access is enabled. Please sign up with email/password using an approved email.");
       return;
     }
 
@@ -157,16 +159,16 @@ function SignupInner() {
         <div className="card">
           <div className="pill">
             <span className="pillDot" aria-hidden="true" />
-            {isBeta ? "Beta access" : "Get started"}
+            {inviteOnly ? "Invite-only" : "Get started"}
           </div>
 
           <h1 className="h1">Create your account</h1>
           <p className="p">
-            {isBeta ? "Beta access is limited while we test stability." : "Start managing your pipeline in one place."}
+            {inviteOnly ? "Access is currently limited while we roll out features." : "Start managing your pipeline in one place."}
           </p>
 
           {allowlistEnabled ? (
-            <div className="hint">Invite-only beta is enabled. Use an approved email to create an account.</div>
+            <div className="hint">Invite-only access is enabled. Use an approved email to create an account.</div>
           ) : null}
 
           {error ? <div className="error">{error}</div> : null}
@@ -177,7 +179,7 @@ function SignupInner() {
             className="btn btnPrimary btnFull btnLg"
             onClick={signUpWithGoogle}
             disabled={loading || oauthLoading}
-            title={allowlistEnabled ? "Google signup disabled in invite-only beta" : "Continue with Google"}
+            title={allowlistEnabled ? "Google signup disabled for invite-only access" : "Continue with Google"}
           >
             <GoogleIcon />
             {oauthLoading ? "Connecting..." : "Continue with Google"}
