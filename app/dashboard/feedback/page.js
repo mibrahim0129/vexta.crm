@@ -1,4 +1,3 @@
-// app/dashboard/feedback/page.js
 "use client";
 
 import { useMemo, useState } from "react";
@@ -70,9 +69,7 @@ export default function FeedbackPage() {
       <div style={styles.header}>
         <div>
           <h1 style={styles.h1}>Feedback</h1>
-          <p style={styles.sub}>
-            Report bugs, request features, or ask questions. This goes straight into your beta queue.
-          </p>
+          <p style={styles.sub}>Report bugs, request features, or ask questions. We review every submission.</p>
         </div>
 
         <button onClick={() => router.back()} style={styles.btnGhost} type="button">
