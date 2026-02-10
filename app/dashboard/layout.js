@@ -80,7 +80,7 @@ export default function DashboardLayout({ children }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [mobileOpen]);
 
-  // ✅ Auth bootstrap (NO beta gate)
+  // ✅ Auth bootstrap (NO invite gating gate)
   useEffect(() => {
     let alive = true;
     let unsubscribeAuth = null;

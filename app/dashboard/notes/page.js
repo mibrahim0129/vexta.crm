@@ -25,7 +25,7 @@ export default function NotesPage() {
   const sb = useMemo(() => supabaseBrowser(), []);
   const mountedRef = useRef(false);
 
-  // ✅ Subscription gating (no beta bypass)
+  // ✅ Subscription gating (no invite text)
   const { loading: subLoading, access, plan } = useSubscription();
   const canWrite = !subLoading && !!access;
 
