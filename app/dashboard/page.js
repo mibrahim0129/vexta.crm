@@ -9,9 +9,6 @@ export default function DashboardPage() {
   const sb = useMemo(() => supabaseBrowser(), []);
   const mountedRef = useRef(false);
 
-  // ✅ Beta-only demo seeding (no helpers)
-  const isBeta = process.env.NEXT_PUBLIC_BETA_MODE === "true";
-
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
   const [ok, setOk] = useState("");
@@ -27,9 +24,8 @@ export default function DashboardPage() {
 
   const [recentDeals, setRecentDeals] = useState([]);
   const [recentNotes, setRecentNotes] = useState([]);
-  const [seeding, setSeeding] = useState(false);
 
-  // ✅ New: global activity feed (mixed)
+  // ✅ Global activity feed (mixed)
   const [activity, setActivity] = useState([]);
 
   async function requireSession() {
@@ -165,128 +161,6 @@ export default function DashboardPage() {
     return "Item";
   }
 
-  async function seedDemoDataIfNeeded(session) {
-    if (!isBeta) return; // ✅ only seed in beta
-    if (!session?.user?.id) return;
-
-    const userId = session.user.id;
-    const seedKey = `vexta_demo_seeded_${userId}`;
-
-    // If we already seeded for this user, don’t do it again.
-    if (typeof window !== "undefined" && localStorage.getItem(seedKey) === "1") return;
-
-    setSeeding(true);
-
-    try {
-      // Only seed if user is brand new (no core data yet)
-      const [c1, c2, c3] = await Promise.all([
-        sb.from("contacts").select("id", { count: "exact", head: true }),
-        sb.from("deals").select("id", { count: "exact", head: true }),
-        sb.from("notes").select("id", { count: "exact", head: true }),
-      ]);
-
-      if (c1.error) throw c1.error;
-      if (c2.error) throw c2.error;
-      if (c3.error) throw c3.error;
-
-      const hasAnything = (c1.count || 0) > 0 || (c2.count || 0) > 0 || (c3.count || 0) > 0;
-      if (hasAnything) {
-        if (typeof window !== "undefined") localStorage.setItem(seedKey, "1");
-        return;
-      }
-
-      // 1) Create contact
-      const { data: contact, error: contactErr } = await sb
-        .from("contacts")
-        .insert([
-          {
-            user_id: userId,
-            first_name: "Ava",
-            last_name: "Martinez",
-          },
-        ])
-        .select("id, first_name, last_name")
-        .single();
-
-      if (contactErr) throw contactErr;
-
-      // 2) Create deal linked to contact
-      const { data: deal, error: dealErr } = await sb
-        .from("deals")
-        .insert([
-          {
-            user_id: userId,
-            contact_id: contact.id,
-            title: "Buy-side: 2BR Condo Search",
-            status: "Warm",
-            value: 350000,
-          },
-        ])
-        .select("id, title")
-        .single();
-
-      if (dealErr) throw dealErr;
-
-      // 3) Create note linked to contact + deal
-      const { error: noteErr } = await sb.from("notes").insert([
-        {
-          user_id: userId,
-          contact_id: contact.id,
-          deal_id: deal.id,
-          body:
-            "Demo note: Client prefers a north-facing unit, wants to be near transit. Budget up to $350k. Next step: send 5 listings + schedule 2 showings.",
-        },
-      ]);
-
-      if (noteErr) throw noteErr;
-
-      // 4) Create task linked to contact + deal
-      const due = new Date(Date.now() + 24 * 60 * 60 * 1000);
-      const { error: taskErr } = await sb.from("tasks").insert([
-        {
-          user_id: userId,
-          contact_id: contact.id,
-          deal_id: deal.id,
-          title: "Send listing shortlist + confirm showing times",
-          description: "Demo task: text client 2 showing windows and send 5 listings.",
-          due_at: due.toISOString(),
-          completed: false,
-        },
-      ]);
-
-      if (taskErr) console.warn("Demo seed: tasks insert failed:", taskErr?.message);
-
-      // 5) Create calendar event linked to contact + deal
-      const start = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000);
-      start.setHours(11, 0, 0, 0);
-      const end = new Date(start.getTime() + 60 * 60 * 1000);
-
-      const { error: calErr } = await sb.from("calendar_events").insert([
-        {
-          user_id: userId,
-          contact_id: contact.id,
-          deal_id: deal.id,
-          title: "Showing (Demo): 1234 W Sample St",
-          location: "1234 W Sample St",
-          start_at: start.toISOString(),
-          end_at: end.toISOString(),
-          notes: "Demo event: bring comps + confirm lockbox code with listing agent.",
-        },
-      ]);
-
-      if (calErr) console.warn("Demo seed: calendar_events insert failed:", calErr?.message);
-
-      if (typeof window !== "undefined") localStorage.setItem(seedKey, "1");
-
-      setOk("Demo data added (beta). You can now explore Contacts, Deals, Notes, Tasks, and Calendar.");
-    } catch (e) {
-      console.error(e);
-      setErr((prev) => prev || e?.message || "Demo seed failed");
-    } finally {
-      setSeeding(false);
-    }
-  }
-
   async function loadDashboard() {
     setErr("");
     setOk("");
@@ -296,10 +170,6 @@ export default function DashboardPage() {
       const session = await requireSession();
       if (!session) return;
 
-      // ✅ Seed demo data first (only for empty accounts)
-      await seedDemoDataIfNeeded(session);
-
-      // Counts (include open tasks + upcoming events)
       const nowIso = new Date().toISOString();
 
       const [c1, c2, c3, openTasks, upcomingEvents, d, n, tasksRes, eventsRes, dealsRes] = await Promise.all([
@@ -309,7 +179,7 @@ export default function DashboardPage() {
         sb.from("tasks").select("id", { count: "exact", head: true }).eq("completed", false),
         sb.from("calendar_events").select("id", { count: "exact", head: true }).gte("start_at", nowIso),
 
-        // Recent Deals (existing)
+        // Recent Deals
         sb
           .from("deals")
           .select(
@@ -321,7 +191,7 @@ export default function DashboardPage() {
           .order("created_at", { ascending: false })
           .limit(5),
 
-        // Recent Notes (existing)
+        // Recent Notes
         sb
           .from("notes")
           .select(
@@ -334,7 +204,7 @@ export default function DashboardPage() {
           .order("created_at", { ascending: false })
           .limit(5),
 
-        // ✅ Activity sources (recent)
+        // Activity sources
         sb
           .from("tasks")
           .select(
@@ -394,7 +264,6 @@ export default function DashboardPage() {
       setRecentDeals(Array.isArray(d.data) ? d.data : []);
       setRecentNotes(Array.isArray(n.data) ? n.data : []);
 
-      // ✅ Build mixed activity feed (notes + tasks + events + deals)
       const noteItems = (Array.isArray(n.data) ? n.data : []).map((row) => buildActivityItem("note", row));
       const taskItems = (Array.isArray(tasksRes.data) ? tasksRes.data : []).map((row) => buildActivityItem("task", row));
       const eventItems = (Array.isArray(eventsRes.data) ? eventsRes.data : []).map((row) => buildActivityItem("event", row));
@@ -419,11 +288,12 @@ export default function DashboardPage() {
 
   useEffect(() => {
     mountedRef.current = true;
+    let channel;
 
     (async () => {
       await loadDashboard();
 
-      const channel = sb.channel("dashboard-rt");
+      channel = sb.channel("dashboard-rt");
       channel
         .on("postgres_changes", { event: "*", schema: "public", table: "contacts" }, () => {
           if (mountedRef.current) loadDashboard();
@@ -434,7 +304,6 @@ export default function DashboardPage() {
         .on("postgres_changes", { event: "*", schema: "public", table: "notes" }, () => {
           if (mountedRef.current) loadDashboard();
         })
-        // ✅ NEW: refresh dashboard when tasks/events change too
         .on("postgres_changes", { event: "*", schema: "public", table: "tasks" }, () => {
           if (mountedRef.current) loadDashboard();
         })
@@ -442,12 +311,12 @@ export default function DashboardPage() {
           if (mountedRef.current) loadDashboard();
         })
         .subscribe((status) => setRtStatus(String(status || "").toLowerCase()));
-
-      return () => {
-        mountedRef.current = false;
-        sb.removeChannel(channel);
-      };
     })();
+
+    return () => {
+      mountedRef.current = false;
+      if (channel) sb.removeChannel(channel);
+    };
 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -466,8 +335,6 @@ export default function DashboardPage() {
           <h1 style={styles.h1}>Dashboard</h1>
           <p style={styles.sub}>
             Welcome back • Realtime: <span style={styles.badge}>{rtStatus}</span>
-            {isBeta ? <span style={{ marginLeft: 8, ...styles.badgeMuted }}>Beta</span> : null}
-            {seeding ? <span style={{ marginLeft: 8, ...styles.badgeMuted }}>Seeding demo data…</span> : null}
           </p>
         </div>
 
@@ -498,7 +365,7 @@ export default function DashboardPage() {
         <Link href="/dashboard/calendar" style={styles.actionBtn}>
           + Add Event
         </Link>
-        <div style={{ ...styles.actionHint }}>Tip: Start with a contact → attach deals, notes, tasks, and calendar events.</div>
+        <div style={styles.actionHint}>Tip: Start with a contact → attach deals, notes, tasks, and calendar events.</div>
       </div>
 
       <div style={styles.stats}>
@@ -527,13 +394,11 @@ export default function DashboardPage() {
         </div>
       ) : null}
 
-      {/* ✅ NEW: Recent Activity (global feed) */}
+      {/* Recent Activity */}
       <div style={styles.cardWide}>
         <div style={styles.cardTop}>
           <h2 style={styles.h2}>Recent Activity</h2>
-          <div style={{ opacity: 0.7, fontWeight: 900, fontSize: 12 }}>
-            {loading ? "Loading…" : `${activity.length} items`}
-          </div>
+          <div style={{ opacity: 0.7, fontWeight: 900, fontSize: 12 }}>{loading ? "Loading…" : `${activity.length} items`}</div>
         </div>
 
         {loading ? (
@@ -591,9 +456,7 @@ export default function DashboardPage() {
 
                   {it.sub ? <div style={{ marginTop: 6, opacity: 0.8, fontSize: 13 }}>{it.sub}</div> : null}
 
-                  {it?.meta?.location ? (
-                    <div style={{ marginTop: 6, opacity: 0.8, fontSize: 13 }}>📍 {it.meta.location}</div>
-                  ) : null}
+                  {it?.meta?.location ? <div style={{ marginTop: 6, opacity: 0.8, fontSize: 13 }}>📍 {it.meta.location}</div> : null}
                 </div>
               );
             })}
@@ -601,7 +464,7 @@ export default function DashboardPage() {
         )}
       </div>
 
-      {/* Your existing two cards */}
+      {/* Existing two cards */}
       <div className="grid2" style={styles.grid}>
         <div style={styles.card}>
           <div style={styles.cardTop}>
@@ -699,9 +562,6 @@ export default function DashboardPage() {
           .grid2 {
             grid-template-columns: 1fr !important;
           }
-          .stats5 {
-            grid-template-columns: 1fr !important;
-          }
         }
       `}</style>
     </div>
@@ -735,24 +595,7 @@ const styles = {
     fontSize: 12,
   },
 
-  badgeMuted: {
-    display: "inline-block",
-    padding: "2px 10px",
-    borderRadius: 999,
-    border: "1px solid rgba(255,255,255,0.12)",
-    background: "rgba(255,255,255,0.04)",
-    fontWeight: 900,
-    fontSize: 12,
-    opacity: 0.9,
-  },
-
-  actionsRow: {
-    marginTop: 14,
-    display: "flex",
-    gap: 10,
-    flexWrap: "wrap",
-    alignItems: "center",
-  },
+  actionsRow: { marginTop: 14, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" },
 
   actionBtn: {
     padding: "10px 12px",
@@ -775,12 +618,7 @@ const styles = {
     opacity: 0.75,
   },
 
-  stats: {
-    marginTop: 14,
-    display: "grid",
-    gridTemplateColumns: "repeat(5, minmax(0, 1fr))",
-    gap: 12,
-  },
+  stats: { marginTop: 14, display: "grid", gridTemplateColumns: "repeat(5, minmax(0, 1fr))", gap: 12 },
 
   stat: {
     textDecoration: "none",
@@ -794,43 +632,19 @@ const styles = {
     transition: "transform 0.05s ease",
   },
 
-  grid: {
-    marginTop: 12,
-    display: "grid",
-    gridTemplateColumns: "1fr 1fr",
-    gap: 12,
-  },
+  grid: { marginTop: 12, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 },
 
-  cardWide: {
-    marginTop: 14,
-    padding: 16,
-    border: "1px solid #242424",
-    borderRadius: 16,
-    background: "#111111",
-  },
+  cardWide: { marginTop: 14, padding: 16, border: "1px solid #242424", borderRadius: 16, background: "#111111" },
 
   card: { padding: 16, border: "1px solid #242424", borderRadius: 16, background: "#111111" },
   cardTop: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" },
   h2: { margin: 0, fontSize: 18, fontWeight: 900 },
 
-  item: {
-    padding: 14,
-    borderRadius: 16,
-    border: "1px solid #242424",
-    background: "#101010",
-    display: "grid",
-    gap: 10,
-  },
+  item: { padding: 14, borderRadius: 16, border: "1px solid #242424", background: "#101010", display: "grid", gap: 10 },
 
   itemTopRow: { display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" },
 
-  activityTopRow: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
-    gap: 12,
-    flexWrap: "wrap",
-  },
+  activityTopRow: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap" },
 
   pill: {
     display: "inline-block",
@@ -844,7 +658,6 @@ const styles = {
     opacity: 0.95,
   },
 
-  // ✅ Tags for activity
   tagBase: {
     display: "inline-flex",
     alignItems: "center",
