@@ -1,3 +1,4 @@
+// app/about/page.js
 "use client";
 
 import Link from "next/link";
@@ -89,7 +90,7 @@ export default function AboutPage() {
           </div>
 
           <div className="fine">
-            Have feedback during beta?{" "}
+            Have feedback or need help?{" "}
             <Link className="fineLink" href="/contact">
               Contact us
             </Link>
