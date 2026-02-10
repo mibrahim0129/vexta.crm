@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { supabaseBrowser } from "@/lib/supabase/browser";
 
-// ✅ Soft gating
+// Soft gating
 import { useSubscription } from "@/lib/subscription/useSubscription";
 import UpgradeBanner from "@/components/UpgradeBanner";
 
@@ -12,14 +12,9 @@ export default function TasksPage() {
   const sb = useMemo(() => supabaseBrowser(), []);
   const mountedRef = useRef(false);
 
-  // ✅ Beta Mode toggle
-  const isBeta = process.env.NEXT_PUBLIC_BETA_MODE === "true";
-
-  // ✅ Subscription (soft gating)
+  // Subscription (soft gating)
   const { loading: subLoading, access, plan } = useSubscription();
-
-  // ✅ In beta: everything is enabled
-  const canWrite = isBeta ? true : !subLoading && !!access;
+  const canWrite = !subLoading && !!access;
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -46,7 +41,7 @@ export default function TasksPage() {
     due_at: "",
   });
 
-  // ✅ Edit modal
+  // Edit modal
   const [editing, setEditing] = useState(null); // task object
   const [editForm, setEditForm] = useState({
     title: "",
@@ -146,8 +141,6 @@ export default function TasksPage() {
   }
 
   function requireWriteOrWarn(message) {
-    if (isBeta) return true;
-
     if (subLoading) {
       setErr("Checking your plan… please try again.");
       return false;
@@ -163,7 +156,7 @@ export default function TasksPage() {
     const { data, error } = await sb
       .from("contacts")
       .select("id, first_name, last_name, created_at, user_id")
-      .eq("user_id", session.user.id) // ✅ RLS-safe
+      .eq("user_id", session.user.id)
       .order("created_at", { ascending: false });
 
     if (error) throw error;
@@ -181,7 +174,7 @@ export default function TasksPage() {
     const { data, error } = await sb
       .from("deals")
       .select("id, title, contact_id, created_at, user_id")
-      .eq("user_id", session.user.id) // ✅ RLS-safe
+      .eq("user_id", session.user.id)
       .order("created_at", { ascending: false });
 
     if (error) throw error;
@@ -189,13 +182,12 @@ export default function TasksPage() {
   }
 
   async function loadTasksWithSession(session) {
-    // ✅ RLS-safe + controlled columns (faster than select("*"))
     const { data, error } = await sb
       .from("tasks")
       .select("id, user_id, contact_id, deal_id, title, description, due_at, completed, created_at")
-      .eq("user_id", session.user.id) // ✅ critical
+      .eq("user_id", session.user.id)
       .order("created_at", { ascending: false })
-      .limit(500); // safety cap
+      .limit(500);
 
     if (error) throw error;
     setTasks(Array.isArray(data) ? data : []);
@@ -209,11 +201,7 @@ export default function TasksPage() {
       const session = await requireSession("/dashboard/tasks");
       if (!session) return;
 
-      await Promise.all([
-        loadContactsWithSession(session),
-        loadDealsWithSession(session),
-        loadTasksWithSession(session),
-      ]);
+      await Promise.all([loadContactsWithSession(session), loadDealsWithSession(session), loadTasksWithSession(session)]);
     } catch (e) {
       console.error(e);
       setErr(e?.message || "Failed to load data");
@@ -267,7 +255,6 @@ export default function TasksPage() {
     }
   }
 
-  // ✅ One safe update helper for tasks (fixes RLS + always returns updated row)
   async function updateTask(taskId, patch) {
     const session = await requireSession("/dashboard/tasks");
     if (!session) return null;
@@ -276,7 +263,7 @@ export default function TasksPage() {
       .from("tasks")
       .update(patch)
       .eq("id", taskId)
-      .eq("user_id", session.user.id) // ✅ critical for RLS
+      .eq("user_id", session.user.id)
       .select("id, user_id, contact_id, deal_id, title, description, due_at, completed, created_at")
       .single();
 
@@ -458,7 +445,9 @@ export default function TasksPage() {
     const overdueFlag = isOverdue(t.due_at, t.completed);
     const todayFlag = !overdueFlag && isToday(t.due_at);
 
-    const disableWrites = isBeta ? false : !canWrite || subLoading;
+    const disableWrites = !canWrite || subLoading;
+
+    const tooltip = subLoading ? "Checking plan…" : !canWrite ? "Upgrade required" : "";
 
     return (
       <div key={t.id} style={styles.item}>
@@ -471,17 +460,8 @@ export default function TasksPage() {
                 ...(disableWrites ? { opacity: 0.55, cursor: "not-allowed" } : {}),
               }}
               title={
-                isBeta
-                  ? t.completed
-                    ? "Mark as open"
-                    : "Mark as done"
-                  : subLoading
-                  ? "Checking plan…"
-                  : !canWrite
-                  ? "Upgrade required"
-                  : t.completed
-                  ? "Mark as open"
-                  : "Mark as done"
+                tooltip ||
+                (t.completed ? "Mark as open" : "Mark as done")
               }
               type="button"
               disabled={disableWrites}
@@ -538,7 +518,7 @@ export default function TasksPage() {
               }}
               type="button"
               disabled={disableWrites}
-              title={isBeta ? "Edit task" : subLoading ? "Checking plan…" : !canWrite ? "Upgrade required" : "Edit task"}
+              title={tooltip || "Edit task"}
             >
               Edit
             </button>
@@ -551,7 +531,7 @@ export default function TasksPage() {
               }}
               type="button"
               disabled={disableWrites}
-              title={isBeta ? "Delete task" : subLoading ? "Checking plan…" : !canWrite ? "Upgrade required" : "Delete task"}
+              title={tooltip || "Delete task"}
             >
               Delete
             </button>
@@ -581,11 +561,7 @@ export default function TasksPage() {
           <p style={styles.sub}>
             Daily to-dos • Realtime: <span style={styles.badge}>{rtStatus}</span>{" "}
             <span style={{ opacity: 0.85 }}>
-              {isBeta
-                ? " • Beta Mode (all features unlocked)"
-                : subLoading
-                ? " • Checking plan…"
-                : ` • Plan: ${plan || "Free"}`}
+              {subLoading ? " • Checking plan…" : ` • Plan: ${plan || "Free"}`}
             </span>
           </p>
         </div>
@@ -597,8 +573,8 @@ export default function TasksPage() {
         </div>
       </div>
 
-      {/* ✅ Upgrade banner (disabled in beta) */}
-      {!isBeta && !subLoading && !access ? (
+      {/* Upgrade banner */}
+      {!subLoading && !access ? (
         <div style={{ marginTop: 14 }}>
           <UpgradeBanner
             title="Upgrade to use tasks"
@@ -680,11 +656,17 @@ export default function TasksPage() {
             style={{
               ...styles.btnPrimary,
               ...(!canWrite || subLoading
-                ? { opacity: 0.55, cursor: "not-allowed", border: "1px solid #2a2a2a", background: "#141414", color: "#bdbdbd" }
+                ? {
+                    opacity: 0.55,
+                    cursor: "not-allowed",
+                    border: "1px solid #2a2a2a",
+                    background: "#141414",
+                    color: "#bdbdbd",
+                  }
                 : {}),
             }}
           >
-            {isBeta ? (saving ? "Saving..." : "Add Task") : subLoading ? "Checking plan…" : saving ? "Saving..." : "Add Task"}
+            {subLoading ? "Checking plan…" : saving ? "Saving..." : "Add Task"}
           </button>
 
           {!hasContacts ? (
@@ -697,7 +679,7 @@ export default function TasksPage() {
             </div>
           ) : null}
 
-          {!isBeta && hasContacts && !subLoading && !access ? (
+          {hasContacts && !subLoading && !access ? (
             <div style={{ marginTop: 6, opacity: 0.75, fontSize: 12 }}>
               Creating/completing/editing/deleting tasks is disabled until you upgrade.
             </div>
@@ -806,7 +788,7 @@ export default function TasksPage() {
         )}
       </div>
 
-      {/* ✅ Edit Modal */}
+      {/* Edit Modal */}
       {editing ? (
         <div
           style={styles.modalOverlay}
