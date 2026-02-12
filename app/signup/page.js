@@ -50,11 +50,6 @@ function SignupInner() {
   const sp = useSearchParams();
   const sb = useMemo(() => supabaseBrowser(), []);
 
-  // ✅ Rename beta gating to invite-only gating (no "beta" strings)
-  const inviteOnly = process.env.NEXT_PUBLIC_INVITE_ONLY === "true";
-  const allowlist = useMemo(() => parseAllowlist(process.env.NEXT_PUBLIC_INVITE_ALLOWLIST), []);
-  const allowlistEnabled = inviteOnly && allowlist.size > 0;
-
   const redirectTo = useMemo(() => {
     const r = sp.get("redirectTo") || sp.get("next");
     return r && r.startsWith("/") ? r : "/dashboard";
@@ -68,11 +63,6 @@ function SignupInner() {
   const [error, setError] = useState("");
   const [ok, setOk] = useState("");
 
-  function isAllowedEmail(candidate) {
-    if (!allowlistEnabled) return true;
-    return allowlist.has(normalizeEmail(candidate));
-  }
-
   async function onSubmit(e) {
     e.preventDefault();
     setError("");
@@ -80,11 +70,6 @@ function SignupInner() {
 
     if (!email || !password) {
       setError("Please enter an email and password.");
-      return;
-    }
-
-    if (!isAllowedEmail(email)) {
-      setError("Vexta is invite-only right now. This email is not approved yet.");
       return;
     }
 
