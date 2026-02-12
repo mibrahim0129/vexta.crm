@@ -83,17 +83,28 @@ a {
   margin: 0 auto;
 }
 
-.header {
+/* ---------- Standardized headers ---------- */
+.siteHeader,
+.appHeader {
   position: sticky;
   top: 0;
-  z-index: 30;
-  height: var(--headerH);
   backdrop-filter: blur(10px);
-  background: rgba(0, 0, 0, 0.55);
   border-bottom: 1px solid var(--border);
+  height: var(--headerH);
 }
 
-.headerInner {
+.siteHeader {
+  z-index: 50;
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.appHeader {
+  z-index: 60;
+  background: rgba(0, 0, 0, 0.65);
+}
+
+.siteHeaderInner,
+.appHeaderInner {
   height: var(--headerH);
   display: flex;
   align-items: center;
@@ -102,11 +113,33 @@ a {
 }
 
 .brand {
-  font-weight: 800;
-  letter-spacing: 0.2px;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 950;
+  letter-spacing: -0.2px;
 }
 
-.nav {
+.brandMark {
+  width: 30px;
+  height: 30px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.06);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 950;
+}
+
+.brandName {
+  font-size: 16px;
+  font-weight: 950;
+  letter-spacing: -0.3px;
+}
+
+.nav,
+.appNav {
   display: flex;
   align-items: center;
   gap: 16px;
@@ -114,8 +147,51 @@ a {
   color: var(--muted);
 }
 
-.nav a:hover {
+.nav a:hover,
+.appNav a:hover {
   color: var(--text);
+}
+
+.navLink,
+.appNavLink {
+  color: rgba(255, 255, 255, 0.75);
+  font-size: 14px;
+  font-weight: 800;
+  padding: 8px 10px;
+  border-radius: 10px;
+  position: relative;
+  white-space: nowrap;
+}
+
+.navLink:hover,
+.appNavLink:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.navLinkActive,
+.appNavLinkActive {
+  color: rgba(255, 255, 255, 0.95);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.headerRight,
+.appHeaderRight {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.userPill {
+  padding: 8px 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  color: rgba(255, 255, 255, 0.85);
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* ---------- Typography ---------- */
@@ -148,6 +224,7 @@ a {
   padding: 18px;
 }
 
+/* Base button (kept from your original) */
 .btn {
   display: inline-flex;
   align-items: center;
@@ -183,6 +260,45 @@ a {
   background: transparent;
 }
 
+/* Header-friendly button variants (used by both headers) */
+.btnPrimary {
+  height: 42px;
+  padding: 0 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: #fff;
+  color: #0a0a0a;
+  font-weight: 900;
+  font-size: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.btnPrimary:hover {
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.btnGhost {
+  height: 42px;
+  padding: 0 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.06);
+  color: #fff;
+  font-weight: 900;
+  font-size: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.btnGhost:hover {
+  background: rgba(255, 255, 255, 0.10);
+}
+
 .error {
   border: 1px solid rgba(255, 80, 80, 0.35);
   background: rgba(255, 80, 80, 0.12);
@@ -202,11 +318,15 @@ a {
     font-size: 32px;
   }
 
-  .nav {
+  .nav,
+  .appNav {
     gap: 12px;
   }
 }
-/* ---------- Home page styles (moved from app/page.js) ---------- */
+
+/* -------------------------------------------------------------------------- */
+/* ---------- Home page styles (kept, scoped to .home) ---------- */
+/* -------------------------------------------------------------------------- */
 
 .home .wrap {
   width: 100%;
