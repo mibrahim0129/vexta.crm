@@ -1,6 +1,3 @@
-// app/billing/success/page.js
-export const dynamic = "force-dynamic";
-
 import { Suspense } from "react";
 import SuccessClient from "./SuccessClient";
 
